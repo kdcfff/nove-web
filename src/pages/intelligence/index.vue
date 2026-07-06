@@ -431,9 +431,9 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
           <el-icon>
             <component :is="card.icon" />
           </el-icon>
-          <div>
-            <span>{{ card.label }}</span>
-            <strong>{{ card.value }}</strong>
+          <div class="metric-copy">
+            <span class="metric-label">{{ card.label }}</span>
+            <strong class="metric-value">{{ card.value }}</strong>
           </div>
         </div>
       </div>
@@ -750,26 +750,37 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
 
 <style scoped lang="scss">
 .intelligence-page {
+  --ci-canvas: #f6f7f9;
+  --ci-surface: #ffffff;
+  --ci-surface-muted: #f3f4f6;
+  --ci-surface-raised: #fbfcfe;
+  --ci-border: #dcdfe6;
+  --ci-border-soft: #e8edf3;
+  --ci-text: #1f2329;
+  --ci-text-secondary: #606266;
+  --ci-text-muted: #909399;
+  --ci-primary: #2563eb;
+  --ci-success: #059669;
+  --ci-warning: #d97706;
+  --ci-danger: #dc2626;
+
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-height: 100%;
   padding: 20px;
-  color: #172033;
-  background: linear-gradient(180deg, #f6f8fb 0%, #eef3f7 100%);
+  color: var(--ci-text);
+  background: var(--ci-canvas);
 }
-
 .surface {
-  background: #ffffff;
-  border: 1px solid #dfe7ef;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgb(31 47 70 / 6%);
+  box-shadow: 0 1px 2px rgb(31 35 41 / 4%), 0 10px 24px rgb(31 35 41 / 5%);
 }
-
 .hero-surface {
   padding: 18px;
 }
-
 .intelligence-header,
 .detail-title,
 .detail-actions,
@@ -777,13 +788,11 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   display: flex;
   align-items: center;
 }
-
 .intelligence-header {
   gap: 18px;
   align-items: flex-start;
   justify-content: space-between;
 }
-
 .title-block {
   h1 {
     margin: 0;
@@ -791,170 +800,204 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
     line-height: 1.25;
     letter-spacing: 0;
   }
-
   p {
     margin: 6px 0 0;
-    color: #56657a;
+    color: var(--ci-text-secondary);
   }
 }
-
 .eyebrow {
   display: inline-flex;
   margin-bottom: 6px;
-  color: #46607a;
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0;
+  color: var(--ci-text-secondary);
   text-transform: uppercase;
+  letter-spacing: 0;
 }
-
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
 }
-
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(140px, 1fr));
   gap: 10px;
   margin-top: 16px;
 }
-
 .metric-item {
+  --metric-color: var(--ci-primary);
+  --metric-soft: #eff6ff;
+
+  position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
   min-height: 72px;
-  padding: 12px;
-  background: #f8fbfd;
-  border: 1px solid #e5edf4;
+  padding: 13px 14px 13px 16px;
+  overflow: hidden;
+  background: var(--ci-surface-raised);
+  border: 1px solid var(--ci-border-soft);
   border-radius: 8px;
-
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%);
+  &::before {
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    left: 0;
+    width: 3px;
+    content: '';
+    background: var(--metric-color);
+    border-radius: 0 999px 999px 0;
+  }
   .el-icon {
-    width: 38px;
-    height: 38px;
-    color: #1f5eff;
-    background: #eaf0ff;
+    width: 36px;
+    height: 36px;
+    color: var(--metric-color);
+    background: var(--metric-soft);
     border-radius: 8px;
   }
-
-  span {
-    display: block;
-    color: #66758a;
-    font-size: 13px;
-  }
-
-  strong {
-    display: block;
-    margin-top: 2px;
-    font-size: 22px;
-    line-height: 1;
-  }
 }
-
-.metric-danger .el-icon {
-  color: #c2410c;
-  background: #fff1e8;
+.metric-copy {
+  min-width: 0;
 }
-
-.metric-warning .el-icon {
-  color: #a16207;
-  background: #fff7d6;
+.metric-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ci-text-secondary);
 }
-
-.metric-success .el-icon {
-  color: #047857;
-  background: #e5f8ef;
+.metric-value {
+  display: block;
+  margin-top: 3px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ci-text);
 }
-
+.metric-danger {
+  --metric-color: var(--ci-danger);
+  --metric-soft: #fef2f2;
+}
+.metric-warning {
+  --metric-color: var(--ci-warning);
+  --metric-soft: #fffbeb;
+}
+.metric-success {
+  --metric-color: var(--ci-success);
+  --metric-soft: #ecfdf5;
+}
 .workbench-tabs {
   :deep(.el-tabs__header) {
-    margin: 0 0 12px;
     padding: 0 6px;
+    margin: 0 0 12px;
   }
 }
-
 .workbench-grid {
   display: grid;
   grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
-
 .inbox-panel,
 .report-detail {
   min-height: 620px;
   padding: 14px;
 }
-
 .panel-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 132px;
   gap: 8px;
   margin-bottom: 12px;
 }
-
 .report-scroll {
   height: 560px;
 }
-
 .report-row {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  padding: 13px 14px 13px 16px;
   margin-bottom: 8px;
-  padding: 13px;
+  overflow: hidden;
+  color: inherit;
   text-align: left;
   cursor: pointer;
-  background: #f8fafc;
-  border: 1px solid #e4ebf2;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
   border-radius: 8px;
   transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  &::before {
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: 0;
+    width: 3px;
+    content: '';
+    background: transparent;
+    border-radius: 0 999px 999px 0;
+    transition: background-color 180ms ease;
+  }
 }
-
 .report-row:hover,
 .report-row.is-active {
-  background: #ffffff;
-  border-color: #8fb2ff;
-  box-shadow: 0 8px 20px rgb(31 94 255 / 9%);
+  background: #f8fbff;
+  border-color: #9bb9ff;
+  box-shadow: 0 8px 18px rgb(37 99 235 / 8%);
 }
-
+.report-row:focus-visible {
+  outline: 2px solid rgb(37 99 235 / 38%);
+  outline-offset: 2px;
+}
+.report-row.is-active::before {
+  background: var(--ci-primary);
+}
 .report-row.is-unread {
-  border-left: 4px solid #1f5eff;
+  background: #fcfdff;
 }
-
+.report-row.is-unread::before {
+  background: var(--ci-primary);
+}
 .report-head,
 .report-footer {
   display: flex;
   align-items: center;
 }
-
 .report-head {
-  justify-content: space-between;
   gap: 8px;
+  justify-content: space-between;
 }
-
 .report-title {
-  color: #172033;
   font-weight: 600;
   line-height: 1.45;
+  color: var(--ci-text);
 }
-
 .report-footer {
-  gap: 10px;
-  color: #66758a;
-  font-size: 12px;
   flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ci-text-muted);
+  span {
+    display: inline-flex;
+    align-items: center;
+  }
+  span + span::before {
+    width: 3px;
+    height: 3px;
+    margin-right: 10px;
+    content: '';
+    background: #c4ccd6;
+    border-radius: 999px;
+  }
 }
-
 .detail-title {
   gap: 12px;
   justify-content: space-between;
-
   h2 {
     margin: 0;
     font-size: 22px;
@@ -962,26 +1005,22 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
     letter-spacing: 0;
   }
 }
-
 .report-descriptions {
   margin-top: 16px;
 }
-
 .detail-tabs {
   margin-top: 14px;
 }
-
 .evidence-stack {
   display: grid;
   gap: 12px;
 }
-
 .evidence-block {
   padding: 14px;
-  background: #f8fafc;
-  border: 1px solid #e4ebf2;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
   border-radius: 8px;
-
+  box-shadow: 0 1px 2px rgb(31 35 41 / 3%);
   header {
     display: flex;
     align-items: center;
@@ -989,86 +1028,77 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
     margin-bottom: 12px;
   }
 }
-
 .diff-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-
 .diff-cell {
   min-height: 92px;
-  padding: 12px;
+  padding: 12px 12px 12px 14px;
+  border-left: 3px solid transparent;
   border-radius: 8px;
-
   span {
-    color: #5d6b7c;
     font-size: 13px;
     font-weight: 700;
+    color: var(--ci-text-secondary);
   }
-
   p {
     margin: 8px 0 0;
-    color: #172033;
     line-height: 1.55;
+    color: var(--ci-text);
   }
 }
-
 .diff-cell.old {
-  background: #fff7ed;
+  background: #fff8f1;
   border: 1px solid #fed7aa;
+  border-left-color: var(--ci-warning);
 }
-
 .diff-cell.fresh {
-  background: #ecfdf5;
+  background: #f0fdf7;
   border: 1px solid #bbf7d0;
+  border-left-color: var(--ci-success);
 }
-
 .snippet,
 .reason {
-  color: #56657a;
   line-height: 1.65;
+  color: var(--ci-text-secondary);
 }
-
 .analysis-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-
   section {
     min-height: 132px;
     padding: 14px;
-    background: #f8fafc;
-    border: 1px solid #e4ebf2;
+    background: var(--ci-surface);
+    border: 1px solid var(--ci-border-soft);
     border-radius: 8px;
+    box-shadow: 0 1px 2px rgb(31 35 41 / 3%);
   }
-
   h3 {
     margin: 0 0 8px;
     font-size: 15px;
+    color: var(--ci-text);
   }
-
   p {
     margin: 0;
     line-height: 1.65;
   }
 }
-
 .action-list {
   :deep(.el-timeline) {
     padding-left: 0;
   }
 }
-
 .detail-actions {
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
-  margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid #e5edf4;
-  flex-wrap: wrap;
+  margin-top: 16px;
+  border-top: 1px solid var(--ci-border-soft);
 }
-
 .management-layout,
 .targets-layout {
   display: grid;
@@ -1076,82 +1106,79 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   gap: 14px;
   align-items: start;
 }
-
 .table-card:last-child {
   grid-column: 1 / -1;
 }
-
 .card-header {
-  justify-content: space-between;
   gap: 12px;
+  justify-content: space-between;
   font-weight: 700;
 }
-
 .form-card,
 .table-card,
 .draft-card {
+  border: 1px solid var(--ci-border);
   border-radius: 8px;
+  :deep(.el-card__header) {
+    padding: 13px 14px;
+    background: #fbfcfe;
+    border-bottom: 1px solid var(--ci-border-soft);
+  }
+  :deep(.el-card__body) {
+    padding: 14px;
+  }
 }
-
 .draft-list {
   display: grid;
   gap: 12px;
 }
-
 .draft-row {
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e4ebf2;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
   border-radius: 8px;
-
   .el-progress {
     grid-column: 1 / -1;
   }
 }
 
-@media (max-width: 980px) {
+@media (width <= 980px) {
   .workbench-grid,
   .management-layout,
   .targets-layout,
   .analysis-grid {
     grid-template-columns: 1fr;
   }
-
   .intelligence-header {
-    align-items: flex-start;
     flex-direction: column;
     gap: 10px;
+    align-items: flex-start;
   }
-
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .inbox-panel,
   .report-detail {
     min-height: auto;
   }
-
   .report-scroll {
     height: 420px;
   }
 }
 
-@media (max-width: 640px) {
+@media (width <= 640px) {
   .intelligence-page {
     padding: 12px;
   }
-
   .metric-grid,
   .panel-toolbar,
   .diff-grid {
     grid-template-columns: 1fr;
   }
-
   .header-actions,
   .detail-actions {
     justify-content: flex-start;
