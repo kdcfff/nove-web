@@ -82,7 +82,7 @@ export const useSessionStore = defineStore('session', () => {
       const resArr = await get_session_list(params);
 
       // 预处理会话分组 并添加前缀图标
-      const res = processSessions(resArr.rows);
+      const res = processSessions(Array.isArray(resArr.rows) ? resArr.rows : []);
 
       const allSessions = new Map(sessionList.value.map(item => [item.id, item])); // 现有所有数据
       res.forEach(item => allSessions.set(item.id, { ...item })); // 更新/添加数据
@@ -238,7 +238,7 @@ export const useSessionStore = defineStore('session', () => {
   };
 
   // 在获取会话列表后添加预处理逻辑（示例）
-  function processSessions(sessions: ChatSessionVo[]) {
+  function processSessions(sessions: ChatSessionVo[] = []) {
     return sessions.map((session) => {
       return {
         ...session,

@@ -15,6 +15,11 @@ const senderRef = ref<InstanceType<typeof ChatSender> | null>(null);
 async function handleSubmit(content: string) {
   localStorage.setItem('chatContent', content);
   localStorage.setItem('enableThinking', String(senderRef.value?.isReasoningEnabled || false));
+  localStorage.setItem('agentToolState', JSON.stringify({
+    toolMode: senderRef.value?.agentToolMode || 'auto',
+    selectedTools: senderRef.value?.selectedAgentTools || [],
+    toolArgs: senderRef.value?.toolArgs,
+  }));
 
   senderValue.value = '';
   await sessionStore.createSessionList({

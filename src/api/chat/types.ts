@@ -101,6 +101,18 @@ export interface SendDTO {
    */
   enableThinking?: boolean;
   /**
+   * AgentScope 工具选择模式：auto-自动，disabled-禁用，selected-限定工具，direct-直接执行工具
+   */
+  toolMode?: 'auto' | 'disabled' | 'selected' | 'direct';
+  /**
+   * AgentScope 模式下选择的工具名称
+   */
+  selectedTools?: string[];
+  /**
+   * 直接执行工具模式下的结构化参数
+   */
+  toolArgs?: Record<string, any>;
+  /**
    * 是否支持联网
    */
   enableInternet?: boolean;

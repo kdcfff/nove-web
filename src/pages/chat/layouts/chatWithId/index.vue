@@ -75,6 +75,7 @@ onMounted(() => {
     chatSenderRef.value.isReasoningEnabled = true;
     localStorage.removeItem('enableThinking');
   }
+  restoreAgentToolState();
 });
 
 // 记录进入思考中
@@ -111,6 +112,7 @@ watch(
       // 如果本地有发送内容 ，则直接发送
       const v = localStorage.getItem('chatContent');
       if (v) {
+        restoreAgentToolState();
         // 发送消息
         setTimeout(() => {
           startSSE(v);
@@ -151,6 +153,7 @@ async function startSSE(chatContent: string) {
       content: lastUserMessage?.content ?? '',
       sessionId: route.params?.id !== 'not_login' ? String(route.params?.id) : undefined,
       enableThinking: chatSenderRef.value?.isReasoningEnabled || false,
+      ...getAgentToolPayload(),
       knowledgeId: chatStore.knowledgeId || undefined,
     })) {
       // 处理数据块 - chunk.result 可能是字符串或对象
@@ -199,6 +202,44 @@ async function startSSE(chatContent: string) {
       bubbleItems.value = [...bubbleItems.value];
     }
   }
+}
+
+function restoreAgentToolState() {
+  const raw = localStorage.getItem('agentToolState');
+  if (!raw || !chatSenderRef.value) {
+    return;
+  }
+
+  try {
+    const state = JSON.parse(raw);
+    chatSenderRef.value.agentToolMode = state.toolMode || 'auto';
+    chatSenderRef.value.selectedAgentTools = Array.isArray(state.selectedTools) ? state.selectedTools : [];
+    if (state.toolArgs?.tableName !== undefined) {
+      chatSenderRef.value.directTableName = state.toolArgs.tableName;
+    }
+    if (state.toolArgs?.sql !== undefined) {
+      chatSenderRef.value.directSql = state.toolArgs.sql;
+    }
+  }
+  catch (err) {
+    console.warn('restoreAgentToolState:', err);
+  }
+  finally {
+    localStorage.removeItem('agentToolState');
+  }
+}
+
+function getAgentToolPayload() {
+  if (!chatSenderRef.value?.isReasoningEnabled) {
+    return {};
+  }
+
+  const toolMode = chatSenderRef.value.agentToolMode || 'auto';
+  return {
+    toolMode,
+    selectedTools: chatSenderRef.value.selectedAgentTools || [],
+    toolArgs: chatSenderRef.value.toolArgs,
+  };
 }
 
 // 封装数据处理逻辑

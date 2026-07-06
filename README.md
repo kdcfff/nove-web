@@ -8,6 +8,15 @@ Nova Web keeps normal chat rendering unchanged. When the backend streams AgentSc
 
 The history path uses the same UI shape: `/system/message/list` may return assistant messages with `agentEvents`, and the frontend folds those persisted AG-UI events into static tool-call cards on page reload. History replay is intentionally not animated.
 
+The chat sender also exposes an AgentScope tool selector when thinking mode is used:
+
+| Mode | Request payload | Behavior |
+| --- | --- | --- |
+| Auto | `toolMode: "auto"` | Let the model decide whether to call the database tools |
+| Disabled | `toolMode: "disabled"` | Run AgentScope without tools |
+| Limited | `toolMode: "selected", selectedTools: [...]` | Product label: 限定工具. Restrict the model to the selected database tools |
+| Run tool | `toolMode: "direct", selectedTools: [name], toolArgs: {...}` | Product label: 运行工具. Execute the selected tool directly and render the AG-UI tool events |
+
 Supported event groups:
 
 | AG-UI events | Frontend behavior |

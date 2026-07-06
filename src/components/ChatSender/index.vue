@@ -9,6 +9,20 @@ import ModelSelect from '@/components/ModelSelect/index.vue';
 import { useChatStore } from '@/stores/modules/chat';
 import { useFilesStore } from '@/stores/modules/files';
 
+type AgentToolMode = 'auto' | 'disabled' | 'selected' | 'direct';
+
+interface AgentToolOption {
+  name: string;
+  label: string;
+  description: string;
+}
+
+interface AgentToolModeOption {
+  label: string;
+  value: AgentToolMode;
+  description: string;
+}
+
 const props = defineProps<{
   modelValue?: string;
   loading?: boolean;
@@ -32,6 +46,156 @@ const senderRef = ref<InstanceType<typeof Sender> | null>(null);
 
 // 推理开关状态
 const isReasoningEnabled = ref(false);
+
+const agentToolMode = ref<AgentToolMode>('auto');
+const selectedAgentTools = ref<string[]>([]);
+const directTableName = ref('');
+const directSql = ref('');
+const toolPopoverRef = ref();
+
+const agentToolOptions: AgentToolOption[] = [
+  {
+    name: 'query_all_tables',
+    label: '查询所有表',
+    description: '读取允许访问的数据库表清单',
+  },
+  {
+    name: 'query_table_schema',
+    label: '查询表结构',
+    description: '读取指定表的建表结构',
+  },
+  {
+    name: 'execute_readonly_sql',
+    label: '只读 SQL',
+    description: '执行 SELECT、SHOW、DESC、EXPLAIN 等只读语句',
+  },
+];
+
+const agentToolModeOptions: AgentToolModeOption[] = [
+  {
+    label: '自动',
+    value: 'auto',
+    description: '模型按需要自动选择可用工具。',
+  },
+  {
+    label: '禁用',
+    value: 'disabled',
+    description: '本轮只聊天，不开放工具。',
+  },
+  {
+    label: '限定',
+    value: 'selected',
+    description: '模型仍会判断是否调用工具，但只能使用你勾选的范围。',
+  },
+  {
+    label: '运行',
+    value: 'direct',
+    description: '不走模型决策，直接运行所选工具；输入框只作为备注。',
+  },
+];
+
+function getToolModeOptionLabel(item: unknown) {
+  if (typeof item === 'string') {
+    return item;
+  }
+  return (item as Partial<AgentToolModeOption>).label || '';
+}
+
+function getToolModeOptionDescription(item: unknown) {
+  if (typeof item === 'string') {
+    return '';
+  }
+  return (item as Partial<AgentToolModeOption>).description || '';
+}
+
+const selectedAgentTool = computed({
+  get: () => selectedAgentTools.value[0] || '',
+  set: (value: string) => {
+    selectedAgentTools.value = value ? [value] : [];
+  },
+});
+
+const isToolRunMode = computed(() => agentToolMode.value === 'direct');
+
+const selectedToolLabel = computed(() => {
+  if (agentToolMode.value === 'auto') {
+    return '工具自动';
+  }
+  if (agentToolMode.value === 'disabled') {
+    return '工具禁用';
+  }
+  if (agentToolMode.value === 'direct') {
+    const option = agentToolOptions.find(item => item.name === selectedAgentTool.value);
+    return option ? `运行 ${option.label}` : '运行工具';
+  }
+  if (!selectedAgentTools.value.length) {
+    return '限定工具';
+  }
+  return `限定 ${selectedAgentTools.value.length} 个`;
+});
+
+const senderPlaceholder = computed(() => {
+  if (isToolRunMode.value) {
+    return '可选：补充本次工具运行的备注';
+  }
+  return '请输入内容';
+});
+
+const directToolReady = computed(() => {
+  if (!isToolRunMode.value) {
+    return true;
+  }
+  if (!selectedAgentTool.value) {
+    return false;
+  }
+  if (selectedAgentTool.value === 'query_table_schema') {
+    return Boolean(directTableName.value.trim());
+  }
+  if (selectedAgentTool.value === 'execute_readonly_sql') {
+    return Boolean(directSql.value.trim());
+  }
+  return true;
+});
+
+const submitButtonDisabled = computed(() => {
+  if (agentToolMode.value === 'selected' && selectedAgentTools.value.length === 0) {
+    return true;
+  }
+  return isToolRunMode.value && !directToolReady.value;
+});
+
+const directToolSubmitContent = computed(() => {
+  const option = agentToolOptions.find(item => item.name === selectedAgentTool.value);
+  return option ? `运行工具：${option.label}` : '运行工具';
+});
+
+const toolArgs = computed(() => {
+  if (agentToolMode.value !== 'direct') {
+    return undefined;
+  }
+  if (selectedAgentTool.value === 'query_table_schema') {
+    return { tableName: directTableName.value.trim() };
+  }
+  if (selectedAgentTool.value === 'execute_readonly_sql') {
+    return { sql: directSql.value.trim() };
+  }
+  return {};
+});
+
+watch(agentToolMode, (mode) => {
+  if (mode !== 'auto') {
+    isReasoningEnabled.value = true;
+  }
+  if (mode === 'auto' || mode === 'disabled') {
+    selectedAgentTools.value = [];
+  }
+  if (mode === 'direct' && selectedAgentTools.value.length > 1) {
+    selectedAgentTools.value = [selectedAgentTools.value[0]];
+  }
+  if (mode === 'direct' && !selectedAgentTool.value) {
+    selectedAgentTool.value = agentToolOptions[0].name;
+  }
+});
 
 // 知识库列表配置
 const knowledgeList = ref<any[]>([]);
@@ -78,7 +242,18 @@ function clearKnowledgeSelection() {
 }
 
 function handleSubmit() {
-  emit('submit', senderValue.value);
+  if (agentToolMode.value === 'selected' && selectedAgentTools.value.length === 0) {
+    ElMessage.warning('请至少选择一个可用工具');
+    return;
+  }
+  if (isToolRunMode.value && !directToolReady.value) {
+    ElMessage.warning('请先选择工具并填写必填参数');
+    return;
+  }
+  const content = isToolRunMode.value && !senderValue.value.trim()
+    ? directToolSubmitContent.value
+    : senderValue.value;
+  emit('submit', content);
 }
 
 function handleCancel() {
@@ -149,6 +324,11 @@ defineExpose({
   openHeader,
   closeHeader,
   isReasoningEnabled,
+  agentToolMode,
+  selectedAgentTools,
+  directTableName,
+  directSql,
+  toolArgs,
 });
 </script>
 
@@ -164,7 +344,9 @@ defineExpose({
     variant="updown"
     clearable
     allow-speech
+    :placeholder="senderPlaceholder"
     :loading="loading"
+    :submit-btn-disabled="submitButtonDisabled"
     @submit="handleSubmit"
     @cancel="handleCancel"
   >
@@ -265,6 +447,98 @@ defineExpose({
             </el-icon>
             <span class="action-text">智能推理</span>
           </div>
+
+          <el-popover
+            ref="toolPopoverRef"
+            placement="top-start"
+            :width="340"
+            trigger="click"
+            popper-class="agent-tool-popover"
+          >
+            <template #default>
+              <div class="agent-tool-panel">
+                <el-segmented
+                  v-model="agentToolMode"
+                  class="tool-mode-segmented"
+                  :options="agentToolModeOptions"
+                >
+                  <template #default="{ item }">
+                    <el-tooltip
+                      :content="getToolModeOptionDescription(item)"
+                      placement="top"
+                      :show-after="250"
+                    >
+                      <span class="tool-mode-option-label">{{ getToolModeOptionLabel(item) }}</span>
+                    </el-tooltip>
+                  </template>
+                </el-segmented>
+
+                <el-checkbox-group
+                  v-if="agentToolMode === 'selected'"
+                  v-model="selectedAgentTools"
+                  class="tool-list"
+                >
+                  <el-checkbox
+                    v-for="tool in agentToolOptions"
+                    :key="tool.name"
+                    :value="tool.name"
+                    class="tool-option"
+                  >
+                    <span class="tool-option-label">{{ tool.label }}</span>
+                    <span class="tool-option-desc">{{ tool.description }}</span>
+                  </el-checkbox>
+                </el-checkbox-group>
+                <div
+                  v-if="agentToolMode === 'selected' && selectedAgentTools.length === 0"
+                  class="tool-required-tip"
+                >
+                  限定模式需要至少勾选一个工具。
+                </div>
+
+                <div v-if="agentToolMode === 'direct'" class="direct-tool-form">
+                  <div class="direct-tool-title">
+                    选择要运行的工具
+                  </div>
+                  <el-radio-group v-model="selectedAgentTool" class="tool-list">
+                    <el-radio
+                      v-for="tool in agentToolOptions"
+                      :key="tool.name"
+                      :value="tool.name"
+                      class="tool-option"
+                    >
+                      <span class="tool-option-label">{{ tool.label }}</span>
+                      <span class="tool-option-desc">{{ tool.description }}</span>
+                    </el-radio>
+                  </el-radio-group>
+
+                  <el-input
+                    v-if="selectedAgentTool === 'query_table_schema'"
+                    v-model="directTableName"
+                    placeholder="表名"
+                    clearable
+                  />
+                  <el-input
+                    v-if="selectedAgentTool === 'execute_readonly_sql'"
+                    v-model="directSql"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="SELECT * FROM chat_message LIMIT 5"
+                  />
+                  <div v-if="!directToolReady" class="tool-required-tip">
+                    运行工具前需要补齐工具参数。
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template #reference>
+              <div class="action-btn tool-select-btn" :class="{ active: agentToolMode !== 'auto' }">
+                <el-icon class="action-icon">
+                  <Tools />
+                </el-icon>
+                <span class="action-text">{{ selectedToolLabel }}</span>
+              </div>
+            </template>
+          </el-popover>
         </div>
 
         <!-- 右侧上传按钮 -->
@@ -470,6 +744,77 @@ defineExpose({
   &:active {
     color: #c81d1d;
     background-color: #fde2e2;
+  }
+}
+
+.agent-tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .tool-mode-segmented {
+    width: 100%;
+  }
+
+  .tool-mode-option-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 42px;
+    height: 100%;
+  }
+
+  .tool-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .tool-option {
+    align-items: flex-start;
+    width: 100%;
+    height: auto;
+    margin-right: 0;
+    white-space: normal;
+
+    :deep(.el-checkbox__label),
+    :deep(.el-radio__label) {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      line-height: 1.35;
+      white-space: normal;
+    }
+  }
+
+  .tool-option-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgb(0 0 0 / 85%);
+  }
+
+  .tool-option-desc {
+    font-size: 12px;
+    color: rgb(0 0 0 / 48%);
+  }
+
+  .direct-tool-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .direct-tool-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgb(0 0 0 / 72%);
+  }
+
+  .tool-required-tip {
+    color: var(--el-color-warning, #e6a23c);
+    font-size: 12px;
+    line-height: 1.35;
   }
 }
 </style>
