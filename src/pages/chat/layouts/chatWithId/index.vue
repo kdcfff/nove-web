@@ -4,6 +4,7 @@ import type { AnyObject } from 'typescript-api-pro';
 import type { BubbleProps } from 'vue-element-plus-x/types/Bubble';
 import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList';
 import type { ThinkingStatus } from 'vue-element-plus-x/types/Thinking';
+import type { AguiToolUpdate } from './aguiAdapter';
 import type { ToolCallInfo } from './types';
 import { useHookFetch } from 'hook-fetch/vue';
 import { nextTick } from 'vue';
@@ -15,6 +16,7 @@ import { useModelStore } from '@/stores/modules/model';
 import { useSessionStore } from '@/stores/modules/session';
 import { useUserStore } from '@/stores/modules/user';
 import { codeXRender } from '@/utils/markdownRenderers';
+import { adaptAguiEvent } from './aguiAdapter';
 import ToolCallCard from './components/ToolCallCard.vue';
 
 type MessageItem = BubbleProps & {
@@ -77,6 +79,7 @@ onMounted(() => {
     chatSenderRef.value.isReasoningEnabled = true;
     localStorage.removeItem('enableThinking');
   }
+
 });
 
 // 记录进入思考中
@@ -93,7 +96,7 @@ watch(
       if (_id_ !== 'not_login') {
         // 判断的当前会话id是否有聊天记录，有缓存则直接赋值展示
         if (chatStore.chatMap[`${_id_}`] && chatStore.chatMap[`${_id_}`].length) {
-          bubbleItems.value = chatStore.chatMap[`${_id_}`] as MessageItem[];
+          bubbleItems.value = (chatStore.chatMap[`${_id_}`] ?? []) as MessageItem[];
           // 滚动到底部
           setTimeout(() => {
             bubbleListRef.value?.scrollToBottom();
@@ -104,7 +107,7 @@ watch(
         // 无缓存则请求聊天记录
         await chatStore.requestChatList(`${_id_}`);
         // 请求聊天记录后，赋值回显，并滚动到底部
-        bubbleItems.value = chatStore.chatMap[`${_id_}`] as MessageItem[];
+        bubbleItems.value = (chatStore.chatMap[`${_id_}`] ?? []) as MessageItem[];
 
         // 滚动到底部
         setTimeout(() => {
@@ -242,6 +245,13 @@ function handleDataChunk(chunk: AnyObject | string): boolean {
         return true;
       }
 
+      if (dataObj) {
+        const aguiResult = handleAguiEvent(dataObj);
+        if (aguiResult.handled) {
+          return Boolean(aguiResult.done);
+        }
+      }
+
       if (eventType === 'mcp' && dataObj) {
         handleMcpEvent(dataObj);
         return false;
@@ -254,28 +264,19 @@ function handleDataChunk(chunk: AnyObject | string): boolean {
         }
         const reasoningContent = dataObj.reasoning_content || '';
         if (reasoningContent) {
-          const lastMessage = bubbleItems.value[bubbleItems.value.length - 1];
-          if (lastMessage) {
-            lastMessage.thinkingStatus = 'thinking';
-            lastMessage.loading = true;
-            lastMessage.thinlCollapse = true;
-            lastMessage.reasoning_content += reasoningContent;
-            bubbleItems.value = [...bubbleItems.value];
-          }
+          handleReasoningChunk(reasoningContent);
         }
       }
     }
     else if (typeof chunk === 'object' && chunk !== null) {
+      const aguiResult = handleAguiEvent(chunk);
+      if (aguiResult.handled) {
+        return Boolean(aguiResult.done);
+      }
+
       const reasoningChunk = chunk?.choices?.[0]?.delta?.reasoning_content;
       if (reasoningChunk) {
-        const lastMessage = bubbleItems.value[bubbleItems.value.length - 1];
-        if (lastMessage) {
-          lastMessage.thinkingStatus = 'thinking';
-          lastMessage.loading = true;
-          lastMessage.thinlCollapse = true;
-          lastMessage.reasoning_content += reasoningChunk;
-          bubbleItems.value = [...bubbleItems.value];
-        }
+        handleReasoningChunk(reasoningChunk);
       }
 
       const parsedChunk = chunk?.choices?.[0]?.delta?.content;
@@ -294,6 +295,87 @@ function handleDataChunk(chunk: AnyObject | string): boolean {
   }
 
   return false;
+}
+
+function handleAguiEvent(dataObj: AnyObject) {
+  const result = adaptAguiEvent(dataObj);
+  if (!result.handled) {
+    return result;
+  }
+
+  if (result.text) {
+    handleContentChunk(result.text);
+  }
+
+  if (result.reasoning) {
+    handleReasoningChunk(result.reasoning);
+  }
+
+  if (result.tool) {
+    handleAguiToolUpdate(result.tool);
+  }
+
+  if (result.error) {
+    console.error('[AG-UI] 运行失败:', result.error);
+    ElMessage.error(result.error);
+  }
+
+  return result;
+}
+
+function handleReasoningChunk(reasoningContent: string) {
+  const lastMessage = bubbleItems.value[bubbleItems.value.length - 1];
+  if (lastMessage) {
+    lastMessage.thinkingStatus = 'thinking';
+    lastMessage.loading = true;
+    lastMessage.thinlCollapse = true;
+    lastMessage.reasoning_content += reasoningContent;
+    bubbleItems.value = [...bubbleItems.value];
+  }
+}
+
+function handleAguiToolUpdate(tool: AguiToolUpdate) {
+  const index = toolCallEvents.value.findIndex((item) => {
+    if (tool.toolCallId && item.toolCallId === tool.toolCallId) {
+      return true;
+    }
+    return item.name === tool.name && item.status === 'pending';
+  });
+
+  if (index >= 0) {
+    const updatedEvents = [...toolCallEvents.value];
+    const current = updatedEvents[index];
+    updatedEvents[index] = {
+      ...current,
+      toolCallId: tool.toolCallId || current.toolCallId,
+      name: tool.name || current.name,
+      status: tool.status,
+      result: mergeToolResult(current.result, tool.result),
+      timestamp: Date.now(),
+    };
+    toolCallEvents.value = updatedEvents;
+    return;
+  }
+
+  const toolInfo: ToolCallInfo = {
+    key: ++toolCallKeyCounter,
+    toolCallId: tool.toolCallId,
+    name: tool.name,
+    status: tool.status,
+    result: tool.result,
+    timestamp: Date.now(),
+  };
+  toolCallEvents.value = [...toolCallEvents.value, toolInfo];
+}
+
+function mergeToolResult(current: string | null, next: string | null) {
+  if (!next) {
+    return current;
+  }
+  if (!current) {
+    return next;
+  }
+  return `${current}${next}`;
 }
 
 function handleMcpEvent(dataObj: AnyObject) {

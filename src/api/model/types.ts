@@ -8,7 +8,5 @@ export interface GetSessionListVO {
   modelType?: string;
   modelShow?: string;
   systemPrompt?: string;
-  apiHost?: string;
-  apiKey?: string;
   remark?: string;
 }

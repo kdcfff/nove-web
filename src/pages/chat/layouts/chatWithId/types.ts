@@ -4,6 +4,8 @@
 export interface ToolCallInfo {
   /** 唯一标识 key */
   key?: number;
+  /** AG-UI 工具调用 ID */
+  toolCallId?: string;
   /** 工具名称 */
   name: string;
   /** 调用状态: pending-调用中, success-成功, error-失败 */

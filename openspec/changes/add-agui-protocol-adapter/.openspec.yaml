@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-06
+goal: Support AG-UI text, tool-call, and lifecycle events without replacing the
+  current Vue chat page.
