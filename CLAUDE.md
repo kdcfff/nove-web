@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Design System Protocol
+
+Before changing frontend UI, layout, component structure, or styles, read `DESIGN.md` first, then inspect the relevant local page/component implementation. `DESIGN.md` is the durable design-system source of truth for Nova Web and follows the google-labs-code/design.md idea: machine-readable tokens plus human-readable design rationale.
+
+If `DESIGN.md` conflicts with established local component behavior, preserve the local behavior needed for the product flow and update the design guidance only when making a deliberate, durable design decision.
+
 ## Project Overview
 
 This is **ruoyi-web**, a Vue 3 AI chat application built with TypeScript, Vite, and Element Plus. It provides a chat interface for AI interactions with support for sessions, models, and various authentication methods.
