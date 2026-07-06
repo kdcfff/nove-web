@@ -1,6 +1,7 @@
 import type { ChatMessageVo } from '@/api/chat/types';
 import { defineStore } from 'pinia';
 import { getChatList } from '@/api';
+import { foldAgentEventsToToolCalls } from '@/pages/chat/layouts/chatWithId/aguiAdapter';
 import { useUserStore } from './user';
 
 export const useChatStore = defineStore('chat', () => {
@@ -53,6 +54,7 @@ export const useChatStore = defineStore('chat', () => {
         content: afterThinkContent,
         thinlCollapse: false,
         noStyle: !isUser,
+        toolCalls: isUser ? [] : foldAgentEventsToToolCalls(item.agentEvents),
       };
 
       return result;

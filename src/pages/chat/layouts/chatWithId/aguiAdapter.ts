@@ -1,3 +1,6 @@
+import type { ToolCallInfo } from './types';
+import type { AgentRunEventVo } from '@/api/chat/types';
+
 export type AguiToolStatus = 'pending' | 'success' | 'error';
 
 export interface AguiToolUpdate {
@@ -125,10 +128,42 @@ export function adaptAguiEvent(payload: unknown): AguiAdapterResult {
   return { handled: false };
 }
 
+export function foldAgentEventsToToolCalls(events: AgentRunEventVo[] = []): ToolCallInfo[] {
+  const toolCalls: ToolCallInfo[] = [];
+
+  sortAgentEvents(events).forEach((event, index) => {
+    const payload = normalizeAgentEventPayload(event);
+    const result = adaptAguiEvent(payload);
+    const key = event.sequenceNo ?? event.id ?? index + 1;
+    const timestamp = toTimestamp(event.createTime);
+
+    if (result.tool) {
+      upsertToolCall(toolCalls, result.tool, key, timestamp);
+      return;
+    }
+
+    if (result.error) {
+      upsertToolCall(
+        toolCalls,
+        {
+          toolCallId: event.toolCallId,
+          name: event.toolName || 'AgentScope Run',
+          status: 'error',
+          result: result.error,
+        },
+        key,
+        timestamp,
+      );
+    }
+  });
+
+  return toolCalls;
+}
+
 function toToolUpdate(payload: AguiEvent, status: AguiToolStatus): AguiToolUpdate {
   return {
     toolCallId: stringField(payload, ['toolCallId', 'id']),
-    name: stringField(payload, ['toolCallName', 'toolName', 'name']) || 'Unknown Tool',
+    name: stringField(payload, ['toolCallName', 'toolName', 'name']),
     status,
     result: valueField(payload, ['result', 'content', 'args', 'delta', 'arguments']),
   };
@@ -162,4 +197,96 @@ function valueField(payload: AguiEvent, keys: string[]): string | null {
 
 function isObject(value: unknown): value is AguiEvent {
   return typeof value === 'object' && value !== null;
+}
+
+function sortAgentEvents(events: AgentRunEventVo[]) {
+  return [...events].sort((a, b) => {
+    const left = a.sequenceNo ?? a.id ?? 0;
+    const right = b.sequenceNo ?? b.id ?? 0;
+    return left - right;
+  });
+}
+
+function normalizeAgentEventPayload(event: AgentRunEventVo): AguiEvent {
+  let payload: AguiEvent = {};
+
+  if (event.eventPayload) {
+    try {
+      const parsed = JSON.parse(event.eventPayload);
+      if (isObject(parsed)) {
+        payload = parsed;
+      }
+    }
+    catch {
+      payload = {};
+    }
+  }
+
+  if (!payload.type && event.eventType) {
+    payload.type = event.eventType;
+  }
+  if (!payload.toolCallId && event.toolCallId) {
+    payload.toolCallId = event.toolCallId;
+  }
+  if (!payload.toolCallName && event.toolName) {
+    payload.toolCallName = event.toolName;
+  }
+
+  return payload;
+}
+
+function upsertToolCall(
+  toolCalls: ToolCallInfo[],
+  tool: AguiToolUpdate,
+  key: number,
+  timestamp: number,
+) {
+  const index = toolCalls.findIndex((item) => {
+    if (tool.toolCallId && item.toolCallId === tool.toolCallId) {
+      return true;
+    }
+    return item.name === tool.name && item.status === 'pending';
+  });
+
+  if (index >= 0) {
+    const current = toolCalls[index];
+    toolCalls[index] = {
+      ...current,
+      toolCallId: tool.toolCallId || current.toolCallId,
+      name: tool.name || current.name,
+      status: tool.status,
+      result: mergeToolResult(current.result, tool.result),
+      timestamp,
+    };
+    return;
+  }
+
+  toolCalls.push({
+    key,
+    toolCallId: tool.toolCallId,
+    name: tool.name || 'Unknown Tool',
+    status: tool.status,
+    result: tool.result,
+    timestamp,
+  });
+}
+
+function mergeToolResult(current: string | null, next: string | null) {
+  if (!next) {
+    return current;
+  }
+  if (!current) {
+    return next;
+  }
+  return `${current}${next}`;
+}
+
+function toTimestamp(value?: Date | string) {
+  if (!value) {
+    return Date.now();
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  const timestamp = date.getTime();
+  return Number.isNaN(timestamp) ? Date.now() : timestamp;
 }

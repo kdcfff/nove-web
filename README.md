@@ -2,6 +2,23 @@
 
 Nova Web is the web frontend for the Nova AI assistant experience. It provides a Vue-based chat interface for conversations, sessions, files, model selection, and user authentication flows.
 
+## AgentScope AG-UI Tool Events
+
+Nova Web keeps normal chat rendering unchanged. When the backend streams AgentScope native AG-UI events through `/chat/send`, the chat page handles `event: agui` frames and renders tool-call cards under the assistant message that produced them.
+
+The history path uses the same UI shape: `/system/message/list` may return assistant messages with `agentEvents`, and the frontend folds those persisted AG-UI events into static tool-call cards on page reload. History replay is intentionally not animated.
+
+Supported event groups:
+
+| AG-UI events | Frontend behavior |
+| --- | --- |
+| `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_CHUNK` | Append assistant markdown text |
+| `REASONING_CONTENT`, `REASONING_MESSAGE_CONTENT` | Append thinking content |
+| `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_CHUNK` | Show or update pending tool card |
+| `TOOL_CALL_END`, `TOOL_CALL_RESULT`, `TOOL_RESULT` | Mark tool card as successful |
+| `RUN_ERROR`, `ERROR` | Show error toast and an error card |
+| `RUN_FINISHED` | End the stream |
+
 ## Tech Stack
 
 - Vue 3
