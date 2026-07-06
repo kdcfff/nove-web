@@ -26,6 +26,7 @@ type MessageItem = BubbleProps & {
   thinkingStatus?: ThinkingStatus;
   thinlCollapse?: boolean;
   reasoning_content?: string;
+  toolCalls?: ToolCallInfo[];
   class?: string;
 };
 
@@ -46,13 +47,8 @@ const chatSenderRef = ref<InstanceType<typeof ChatSender> | null>(null);
 const bubbleItems = ref<MessageItem[]>([]);
 const bubbleListRef = ref<BubbleListInstance | null>(null);
 
-// 独立的工具调用事件列表
-const toolCallEvents = ref<ToolCallInfo[]>([]);
 // 工具调用事件计数器（用于生成唯一 key）
 let toolCallKeyCounter = 0;
-
-// 是否有工具调用事件
-const hasToolCallEvents = computed(() => toolCallEvents.value.length > 0);
 
 const copyIconMap = ref<Record<number, string>>({}); // 记录每条消息的复制按钮图标
 const editingMessageKeys = ref<number[]>([]); // 跟踪多个编辑中的消息
@@ -88,8 +84,6 @@ watch(
   () => route.params?.id,
   async (_id_) => {
     if (_id_) {
-      // 切换会话时清空工具调用事件
-      toolCallEvents.value = [];
       toolCallKeyCounter = 0;
 
       if (_id_ !== 'not_login') {
@@ -136,8 +130,6 @@ function handleError(err: any) {
 
 async function startSSE(chatContent: string) {
   try {
-    // 清空上一次的工具调用事件
-    toolCallEvents.value = [];
     toolCallKeyCounter = 0;
 
     // 添加用户输入的消息
@@ -316,6 +308,11 @@ function handleAguiEvent(dataObj: AnyObject) {
 
   if (result.error) {
     console.error('[AG-UI] 运行失败:', result.error);
+    upsertToolCallOnCurrentAssistant({
+      name: 'AgentScope Run',
+      status: 'error',
+      result: result.error,
+    });
     ElMessage.error(result.error);
   }
 
@@ -334,7 +331,17 @@ function handleReasoningChunk(reasoningContent: string) {
 }
 
 function handleAguiToolUpdate(tool: AguiToolUpdate) {
-  const index = toolCallEvents.value.findIndex((item) => {
+  upsertToolCallOnCurrentAssistant(tool);
+}
+
+function upsertToolCallOnCurrentAssistant(tool: AguiToolUpdate) {
+  const currentMessage = getCurrentAssistantMessage();
+  if (!currentMessage) {
+    return;
+  }
+
+  const currentToolCalls = [...(currentMessage.toolCalls ?? [])];
+  const index = currentToolCalls.findIndex((item) => {
     if (tool.toolCallId && item.toolCallId === tool.toolCallId) {
       return true;
     }
@@ -342,9 +349,8 @@ function handleAguiToolUpdate(tool: AguiToolUpdate) {
   });
 
   if (index >= 0) {
-    const updatedEvents = [...toolCallEvents.value];
-    const current = updatedEvents[index];
-    updatedEvents[index] = {
+    const current = currentToolCalls[index];
+    currentToolCalls[index] = {
       ...current,
       toolCallId: tool.toolCallId || current.toolCallId,
       name: tool.name || current.name,
@@ -352,19 +358,33 @@ function handleAguiToolUpdate(tool: AguiToolUpdate) {
       result: mergeToolResult(current.result, tool.result),
       timestamp: Date.now(),
     };
-    toolCallEvents.value = updatedEvents;
-    return;
+  }
+  else {
+    const toolInfo: ToolCallInfo = {
+      key: ++toolCallKeyCounter,
+      toolCallId: tool.toolCallId,
+      name: tool.name || 'Unknown Tool',
+      status: tool.status,
+      result: tool.result,
+      timestamp: Date.now(),
+    };
+    currentToolCalls.push(toolInfo);
   }
 
-  const toolInfo: ToolCallInfo = {
-    key: ++toolCallKeyCounter,
-    toolCallId: tool.toolCallId,
-    name: tool.name,
-    status: tool.status,
-    result: tool.result,
-    timestamp: Date.now(),
-  };
-  toolCallEvents.value = [...toolCallEvents.value, toolInfo];
+  currentMessage.toolCalls = currentToolCalls;
+  bubbleItems.value = [...bubbleItems.value];
+  bubbleListRef.value?.scrollToBottom();
+}
+
+function getCurrentAssistantMessage() {
+  for (let index = bubbleItems.value.length - 1; index >= 0; index -= 1) {
+    const item = bubbleItems.value[index];
+    if (item.role !== 'user') {
+      return item;
+    }
+  }
+
+  return null;
 }
 
 function mergeToolResult(current: string | null, next: string | null) {
@@ -390,42 +410,19 @@ function handleMcpEvent(dataObj: AnyObject) {
     const toolResult = content.result || null;
 
     if (toolStatus === 'pending') {
-      const toolInfo: ToolCallInfo = {
-        key: ++toolCallKeyCounter,
+      upsertToolCallOnCurrentAssistant({
         name: toolName,
         status: 'pending',
         result: null,
-        timestamp: Date.now(),
-      };
-      toolCallEvents.value = [...toolCallEvents.value, toolInfo];
+      });
     }
     else {
-      const index = toolCallEvents.value.findIndex(
-        t => t.name === toolName && t.status === 'pending',
-      );
-      if (index >= 0) {
-        const updatedEvents = [...toolCallEvents.value];
-        updatedEvents[index] = {
-          ...updatedEvents[index],
-          status: toolStatus,
-          result: toolResult,
-          timestamp: Date.now(),
-        };
-        toolCallEvents.value = updatedEvents;
-      }
-      else {
-        const toolInfo: ToolCallInfo = {
-          key: ++toolCallKeyCounter,
-          name: toolName,
-          status: toolStatus,
-          result: toolResult,
-          timestamp: Date.now(),
-        };
-        toolCallEvents.value = [...toolCallEvents.value, toolInfo];
-      }
+      upsertToolCallOnCurrentAssistant({
+        name: toolName,
+        status: toolStatus === 'error' ? 'error' : 'success',
+        result: toolResult,
+      });
     }
-
-    console.log('[SSE] 工具调用列表:', toolCallEvents.value);
   }
   catch (err) {
     console.error('[SSE] MCP 事件解析失败:', err);
@@ -517,6 +514,7 @@ function addMessage(message: string, isUser: boolean) {
     reasoning_content: '',
     thinkingStatus: 'start',
     thinlCollapse: false,
+    toolCalls: [],
     noStyle: !isUser,
   };
   bubbleItems.value.push(obj);
@@ -559,17 +557,6 @@ function handleCreateNewChat() {
 <template>
   <div class="chat-with-id-container">
     <div class="chat-warp">
-      <!-- 工具调用事件区域 -->
-      <Transition name="tool-events-fade">
-        <div v-if="hasToolCallEvents" class="tool-events-wrapper">
-          <ToolCallCard
-            v-for="tool in toolCallEvents"
-            :key="tool.key"
-            :tool-info="tool"
-          />
-        </div>
-      </Transition>
-
       <BubbleList ref="bubbleListRef" :list="bubbleItems" max-height="calc(100vh - 240px)">
         <template #header="{ item }">
           <Thinking
@@ -583,14 +570,28 @@ function handleCreateNewChat() {
         </template>
 
         <template #content="{ item }">
-          <XMarkdown
-            v-if="item.content && item.role === 'system'"
-            :markdown="item.content"
-            :code-x-render="codeXRender"
-            class="markdown-body"
-            :themes="{ light: 'github-light', dark: 'github-dark' }"
-            default-theme-mode="dark"
-          />
+          <div v-if="item.role === 'system'" class="assistant-content">
+            <XMarkdown
+              v-if="item.content"
+              :markdown="item.content"
+              :code-x-render="codeXRender"
+              class="markdown-body"
+              :themes="{ light: 'github-light', dark: 'github-dark' }"
+              default-theme-mode="dark"
+            />
+            <TransitionGroup
+              v-if="item.toolCalls?.length"
+              name="tool-events-fade"
+              tag="div"
+              class="message-tool-events-wrapper"
+            >
+              <ToolCallCard
+                v-for="tool in item.toolCalls"
+                :key="tool.key"
+                :tool-info="tool"
+              />
+            </TransitionGroup>
+          </div>
           <div v-if="item.content && item.role === 'user'" class="userContent">
             <div class="user-bubble" :class="{ editing: editingMessageKeys.includes(item.key) }">
               <template v-if="!editingMessageKeys.includes(item.key)">
@@ -752,8 +753,12 @@ function handleCreateNewChat() {
       margin-bottom: 12px;
     }
 
-    .tool-events-wrapper {
-      padding: 12px;
+    .assistant-content {
+      width: 100%;
+    }
+
+    .message-tool-events-wrapper {
+      margin-top: 8px;
     }
 
     .tool-events-fade-enter-active,

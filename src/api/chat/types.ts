@@ -274,6 +274,68 @@ export interface ChatMessageVo {
    * 用户id
    */
   userId?: number;
+  /**
+   * AgentScope AG-UI 事件列表
+   */
+  agentEvents?: AgentRunEventVo[];
+}
+
+/**
+ * AgentRunEventVo，AgentScope AG-UI 运行事件视图对象 agent_run_event
+ */
+export interface AgentRunEventVo {
+  /**
+   * 主键
+   */
+  id?: number;
+  /**
+   * 会话id
+   */
+  sessionId?: string;
+  /**
+   * 关联的助手消息id
+   */
+  messageId?: number;
+  /**
+   * 用户id
+   */
+  userId?: number;
+  /**
+   * AgentScope run id
+   */
+  agentRunId?: string;
+  /**
+   * AG-UI 事件类型
+   */
+  eventType?: string;
+  /**
+   * AG-UI 原始事件 JSON
+   */
+  eventPayload?: string;
+  /**
+   * 事件序号
+   */
+  sequenceNo?: number;
+  /**
+   * 工具调用id
+   */
+  toolCallId?: string;
+  /**
+   * 工具名称
+   */
+  toolName?: string;
+  /**
+   * 工具来源
+   */
+  toolSource?: string;
+  /**
+   * 工具服务
+   */
+  toolServer?: string;
+  /**
+   * 创建时间
+   */
+  createTime?: Date | string;
 }
 
 export interface workflowVo {
