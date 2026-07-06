@@ -18,6 +18,7 @@ const sessionId = computed(() => route.params?.id);
 const conversationsList = computed(() => sessionStore.sessionList);
 const loadMoreLoading = computed(() => sessionStore.isLoadingMore);
 const active = ref<string | undefined>();
+const isIntelligenceActive = computed(() => route.name === 'intelligence');
 
 const searchKeyword = computed({
   get: () => sessionStore.searchKeyword,
@@ -76,6 +77,10 @@ watch(
 function handleCreatChat() {
   // 创建会话, 跳转到默认聊天
   sessionStore.createSessionBtn();
+}
+
+function handleOpenIntelligence() {
+  router.push({ name: 'intelligence' });
 }
 
 // 切换会话
@@ -194,6 +199,20 @@ function handleMenuCommand(command: string, item: ConversationItem<ChatSessionVo
       </div>
 
       <div class="aside-body">
+        <div class="workbench-nav">
+          <el-button
+            class="workbench-button"
+            :class="{ 'workbench-button-active': isIntelligenceActive }"
+            @click="handleOpenIntelligence"
+          >
+            <el-icon>
+              <DataAnalysis />
+            </el-icon>
+            <span>竞品情报</span>
+            <span v-if="!designStore.isCollapse" class="workbench-badge">MVP</span>
+          </el-button>
+        </div>
+
         <!-- 搜索框 -->
         <div class="search-wrapper">
           <el-input
@@ -305,6 +324,43 @@ function handleMenuCommand(command: string, item: ConversationItem<ChatSessionVo
     // 侧边栏内容样式
     .aside-body {
       // 搜索框样式
+      .workbench-nav {
+        padding: 14px 12px 0;
+        .workbench-button {
+          justify-content: flex-start;
+          width: 100%;
+          height: 36px;
+          padding: 0 12px;
+          color: rgb(0 0 0 / 72%);
+          background: transparent;
+          border: 0;
+          border-radius: 8px;
+          box-shadow: none;
+          :deep(span) {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+          }
+          .workbench-badge {
+            justify-content: center;
+            width: auto;
+            padding: 1px 6px;
+            margin-left: auto;
+            font-size: 11px;
+            color: #2f6f62;
+            background: #e8f5f1;
+            border-radius: 999px;
+          }
+          &:hover,
+          &.workbench-button-active {
+            color: rgb(0 0 0 / 88%);
+            background: #ffffff;
+            box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+          }
+        }
+      }
+
       .search-wrapper {
         padding: 16px 12px 12px;
         .search-input {

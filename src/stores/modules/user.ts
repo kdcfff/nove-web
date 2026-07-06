@@ -1,6 +1,6 @@
 import type { LoginUser } from '@/api/auth/types';
-import { ref } from 'vue';
 import { defineStore } from 'pinia';
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 export const useUserStore = defineStore(

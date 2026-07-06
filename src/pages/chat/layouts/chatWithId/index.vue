@@ -79,7 +79,6 @@ onMounted(() => {
     chatSenderRef.value.isReasoningEnabled = true;
     localStorage.removeItem('enableThinking');
   }
-
 });
 
 // 记录进入思考中

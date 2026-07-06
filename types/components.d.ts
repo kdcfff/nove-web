@@ -14,6 +14,7 @@ declare module 'vue' {
     EchartsRenderer: typeof import('./../src/components/EchartsRenderer/index.vue')['default']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElButtonGroup: typeof import('element-plus/es')['ElButtonGroup']
     ElCollapseTransition: typeof import('element-plus/es')['ElCollapseTransition']
     ElContainer: typeof import('element-plus/es')['ElContainer']
     ElDivider: typeof import('element-plus/es')['ElDivider']
@@ -26,6 +27,7 @@ declare module 'vue' {
     ElInput: typeof import('element-plus/es')['ElInput']
     ElMain: typeof import('element-plus/es')['ElMain']
     ElPopover: typeof import('element-plus/es')['ElPopover']
+    ElSegmented: typeof import('element-plus/es')['ElSegmented']
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     FilesSelect: typeof import('./../src/components/FilesSelect/index.vue')['default']
@@ -40,5 +42,8 @@ declare module 'vue' {
     SvgIcon: typeof import('./../src/components/SvgIcon/index.vue')['default']
     VerificationCode: typeof import('./../src/components/LoginDialog/components/FormLogin/VerificationCode.vue')['default']
     WelecomeText: typeof import('./../src/components/WelecomeText/index.vue')['default']
+  }
+  export interface GlobalDirectives {
+    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
   }
 }

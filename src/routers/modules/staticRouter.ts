@@ -31,6 +31,15 @@ export const layoutRouter: RouteRecordRaw[] = [
           isDefaultChat: false,
         },
       },
+      {
+        path: '/intelligence',
+        name: 'intelligence',
+        component: () => import('@/pages/intelligence/index.vue'),
+        meta: {
+          title: '竞品情报',
+          icon: 'DataAnalysis',
+        },
+      },
     ],
   },
 ];

@@ -17,7 +17,7 @@ function convertJsObjectToJson(jsCode: string): string {
   }
 
   // 为无引号的键添加引号：key: value -> "key": value
-  cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+  cleaned = cleaned.replace(/([{,]\s*)([$_a-z][\w$]*)\s*:/gi, '$1"$2":');
 
   // 处理单引号字符串，转换为双引号
   cleaned = cleaned.replace(/'([^']*)'/g, '"$1"');
@@ -46,9 +46,9 @@ function isEchartsConfig(code: string): boolean {
 
     // 检查是否包含 ECharts 的关键配置字段
     return !!(
-      typeof obj === 'object' &&
-      obj !== null &&
-      (obj.xAxis || obj.yAxis || obj.series || obj.title || obj.legend || obj.gauge || obj.pie || obj.bar)
+      typeof obj === 'object'
+      && obj !== null
+      && (obj.xAxis || obj.yAxis || obj.series || obj.title || obj.legend || obj.gauge || obj.pie || obj.bar)
     );
   }
   catch {
@@ -63,15 +63,15 @@ function renderEcharts(code: string) {
   console.log('[codeXRender] 渲染 echarts，代码长度:', code?.length || 0);
   return h(EchartsRenderer, {
     selfProps: {
-      code: code,
+      code,
       width: '100%',
-      height: '600px',  // 增加高度
+      height: '600px',
       theme: 'dark',
     },
     style: {
       width: '100%',
-      maxWidth: '100%'
-    }
+      maxWidth: '100%',
+    },
   });
 }
 
@@ -92,13 +92,13 @@ function renderCodeBlock(code: string, language: string) {
  * API 格式: { [language]: (props: { raw: { content: string } }) => VNode }
  */
 export const codeXRender = {
-  echarts: (props: { raw: any }) => {
+  'echarts': (props: { raw: any }) => {
     const code = props.raw?.content || '';
     console.log('[codeXRender.echarts] 收到代码，长度:', code.length);
     return renderEcharts(code);
   },
 
-  json: (props: { raw: any }) => {
+  'json': (props: { raw: any }) => {
     const code = props.raw?.content || '';
     console.log('[codeXRender.json] 收到代码，长度:', code.length);
     if (isEchartsConfig(code)) {
@@ -107,7 +107,7 @@ export const codeXRender = {
     return renderCodeBlock(code, 'json');
   },
 
-  javascript: (props: { raw: any }) => {
+  'javascript': (props: { raw: any }) => {
     const code = props.raw?.content || '';
     console.log('[codeXRender.javascript] 收到代码，长度:', code.length);
     if (isEchartsConfig(code)) {
@@ -116,7 +116,7 @@ export const codeXRender = {
     return renderCodeBlock(code, 'javascript');
   },
 
-  text: (props: { raw: any }) => {
+  'text': (props: { raw: any }) => {
     const code = props.raw?.content || '';
     if (isEchartsConfig(code)) {
       return renderEcharts(code);

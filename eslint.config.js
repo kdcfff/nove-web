@@ -22,6 +22,9 @@ export default antfu({
     "no-console": "off", // 忽略console
   },
   ignores: [
+    "**/.claude/**",
+    "**/.comet/**",
+    "**/.codex/**",
     "**/dist/**",
     "**/node_modules/**",
     "**/build/**",
@@ -33,6 +36,8 @@ export default antfu({
     "**/eslint.config.js",
     "./*.cjs",
     "./*.js",
+    "./docker-compose*.yml",
+    "./docker-compose*.yaml",
     "./package.json",
   ],
 });
