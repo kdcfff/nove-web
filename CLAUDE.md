@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Before changing frontend UI, layout, component structure, or styles, read `DESIGN.md` first, then inspect the relevant local page/component implementation. `DESIGN.md` is the durable design-system source of truth for Nova Web and follows the google-labs-code/design.md idea: machine-readable tokens plus human-readable design rationale.
 
+For substantial UI changes, use VoltAgent/awesome-design-md as a reference library for product design patterns, but translate references into Nova's own operational workbench language instead of copying another product's brand identity.
+
 If `DESIGN.md` conflicts with established local component behavior, preserve the local behavior needed for the product flow and update the design guidance only when making a deliberate, durable design decision.
 
 ## Project Overview

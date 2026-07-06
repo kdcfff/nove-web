@@ -8,6 +8,8 @@ Before changing frontend UI, layout, component structure, or styles, read `DESIG
 
 `DESIGN.md` is Nova Web's durable design-system source of truth. It follows the google-labs-code/design.md idea: machine-readable design tokens in YAML front matter plus human-readable rationale in Markdown.
 
+For substantial UI changes, use VoltAgent/awesome-design-md as a reference library for product design patterns, but translate references into Nova's own operational workbench language instead of copying another product's brand identity.
+
 If `DESIGN.md` conflicts with established local component behavior, preserve the behavior needed for the product flow and update the design guidance only when making a deliberate, durable design decision.
 
 ## Project Notes

@@ -1,7 +1,10 @@
 ---
 version: "0.1"
 name: "Nova Web Design System"
-description: "Operational AI workbench design guidance for Nova Web, adapted from https://github.com/google-labs-code/design.md."
+description: "Operational AI workbench design guidance for Nova Web, adapted from google-labs-code/design.md and informed by VoltAgent/awesome-design-md references."
+references:
+  specification: "https://github.com/google-labs-code/design.md"
+  inspiration_library: "https://github.com/VoltAgent/awesome-design-md"
 stack:
   framework: "Vue 3"
   language: "TypeScript"
@@ -79,7 +82,22 @@ components:
 
 Nova Web is an AI workbench and admin-style product surface. Its default posture is calm, dense, scannable, and task-oriented. Build the usable workspace first: chat, competitive intelligence, evidence review, configuration, and operational feedback should feel immediate and dependable.
 
-This file follows the spirit of google-labs-code/design.md: agents need both exact tokens and the reasoning behind them. Before changing any frontend UI, layout, component structure, or style, read this file and inspect the local page/component being changed.
+This file follows the spirit of google-labs-code/design.md: agents need both exact tokens and the reasoning behind them. It also uses VoltAgent/awesome-design-md as an inspiration library for studying how strong product design languages are documented. Before changing any frontend UI, layout, component structure, or style, read this file and inspect the local page/component being changed.
+
+## Reference Library Workflow
+
+Use google-labs-code/design.md as the format baseline and VoltAgent/awesome-design-md as a reference library. The Google project defines the durable structure for Nova's own design system. The VoltAgent collection is useful for comparing product moods, component conventions, and agent-facing prompt guidance.
+
+When a frontend change is larger than a local polish pass, choose up to three relevant reference styles from VoltAgent/awesome-design-md and translate the useful patterns into Nova language. Do not copy another product's brand identity, palette, typography, or distinctive layout wholesale.
+
+Good reference directions for Nova:
+
+- Linear-like density for issue lists, status triage, and execution queues.
+- Vercel-like restraint for developer/admin surfaces, settings, and deployment-style status.
+- Cursor-like AI workbench clarity for chat, tools, context panels, and evidence review.
+- Stripe-like form discipline for configuration, billing-like data entry, or multi-step setup.
+
+The output of reference review should be a short design note in the implementation plan or PR summary: which references were considered, what pattern was borrowed, and what was intentionally kept Nova-specific.
 
 ## Colors
 
@@ -136,6 +154,7 @@ Element Plus is the primary component library. Start with existing Element Plus 
 Do:
 
 - Read `DESIGN.md`, `CLAUDE.md`, `AGENTS.md` when present, and the relevant local implementation before frontend edits.
+- For substantial UI changes, use VoltAgent/awesome-design-md as a reference library and state which references influenced the implementation.
 - Match the existing Vue `<script setup>` and SCSS patterns.
 - Make intelligence and chat flows feel like an operational console: fast to scan, easy to compare, explicit about status.
 - Verify important UI changes in the browser at desktop and mobile widths.
@@ -144,5 +163,6 @@ Don't:
 
 - Build landing-page heroes for app/workbench requests.
 - Add decorative cards, nested cards, gradient blobs, or oversized headings to operational screens.
+- Copy another company's brand system directly from a reference `DESIGN.md`.
 - Introduce a new component library without a clear reason and explicit confirmation.
 - Let dynamic text overlap controls or resize fixed-format UI.
