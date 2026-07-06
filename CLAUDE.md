@@ -98,3 +98,14 @@ Configure in `.env.development`:
 - Vue blocks order: script → template → style
 - Single quotes, semicolons, 2-space indent
 - Commit messages follow conventional commits with commitlint
+
+## Competitive Intelligence Protocol
+
+Before changing competitive intelligence frontend behavior, read the product requirements and backend capture design:
+
+- `/Users/kongdecheng/workspace/nova/doc/竞品情报能力迁移方案.md`
+- `/Users/kongdecheng/workspace/nova/nova-backend/docs/superpowers/specs/2026-07-06-competitive-intelligence-capture-design.md`
+- `/Users/kongdecheng/workspace/nova/nova-backend/docs/openapi/capture-webpage-firecrawl.openapi.yaml`
+- `/Users/kongdecheng/workspace/nova/nova-backend/docs/openapi/capture-webpage-nova-rendered.openapi.yaml`
+
+Frontend intelligence views should expose evidence and old/new change details before AI interpretation, so users can see why a report matters.
