@@ -2,6 +2,7 @@
 import type {
   CompetitorVo,
   FeedbackValue,
+  MonitorTargetSource,
   MonitorTargetVo,
   ReportDetailVo,
   ReportSummaryVo,
@@ -13,6 +14,7 @@ import {
   Collection,
   Delete,
   DocumentChecked,
+  Edit,
   Link,
   Plus,
   Refresh,
@@ -51,7 +53,7 @@ const targets = ref<MonitorTargetVo[]>([]);
 const reports = ref<ReportSummaryVo[]>([]);
 const tasks = ref<TaskRunVo[]>([]);
 const selectedReport = ref<ReportDetailVo | null>(null);
-type DraftSource = 'homepage_link' | 'feed_hint' | 'rule_fallback' | 'manual';
+type DraftSource = MonitorTargetSource;
 type ValidationStatus = 'pending' | 'success' | 'failed';
 type CollectionStatus = 'idle' | 'saving' | 'collecting' | 'baseline' | 'failed';
 type DraftTarget = MonitorTargetVo & {
@@ -74,17 +76,26 @@ const reportPriority = ref<ReportSummaryVo['priority'] | 'all'>('all');
 const taskCompetitorFilter = ref<number | 'all'>('all');
 const competitorDialogVisible = ref(false);
 const competitorDetailDrawerVisible = ref(false);
+const manualTargetDialogVisible = ref(false);
 const competitorDetailLoading = ref(false);
 const detailCompetitor = ref<CompetitorVo | null>(null);
 const detailTargets = ref<MonitorTargetVo[]>([]);
 const detailReports = ref<ReportSummaryVo[]>([]);
 const detailTasks = ref<TaskRunVo[]>([]);
+const editingManualDraft = ref<DraftTarget | null>(null);
 let detailLoadSeq = 0;
 
 const competitorForm = reactive({
   name: '',
   homepage: '',
   positioning: '',
+});
+
+const manualTargetForm = reactive({
+  type: 'official_site' as MonitorTargetVo['type'],
+  title: '',
+  url: '',
+  analysisNotes: '',
 });
 
 const hasReports = computed(() => reports.value.length > 0);
@@ -101,6 +112,7 @@ const detailDrafts = computed(() => detailCompetitor.value ? drafts.value.filter
 const detailStartupRuns = computed(() => detailCompetitor.value ? startupRuns.value.filter(run => belongsToCompetitor(run.target, detailCompetitor.value?.id)) : []);
 const detailUnreadCount = computed(() => detailReports.value.filter(report => !report.read).length);
 const detailSelectedDraftCount = computed(() => detailDrafts.value.filter(draft => draft.selected).length);
+const manualTargetDialogTitle = computed(() => editingManualDraft.value ? '编辑监控目标' : '手动添加监控目标');
 const filteredReports = computed(() => reports.value.filter((report) => {
   const keyword = reportKeyword.value.trim().toLowerCase();
   const matchesKeyword = !keyword
@@ -175,6 +187,36 @@ function openCompetitorDialog() {
 
 function resetCompetitorForm() {
   Object.assign(competitorForm, { name: '', homepage: '', positioning: '' });
+}
+
+function resetManualTargetForm() {
+  editingManualDraft.value = null;
+  Object.assign(manualTargetForm, {
+    type: 'official_site',
+    title: '',
+    url: '',
+    analysisNotes: '',
+  });
+}
+
+function openManualTargetDialog(draft?: DraftTarget) {
+  if (!detailCompetitor.value) {
+    ElMessage.warning('先选择一个竞品');
+    return;
+  }
+  if (draft) {
+    editingManualDraft.value = draft;
+    Object.assign(manualTargetForm, {
+      type: draft.type,
+      title: draft.title,
+      url: draft.url,
+      analysisNotes: draft.analysisNotes || '',
+    });
+  }
+  else {
+    resetManualTargetForm();
+  }
+  manualTargetDialogVisible.value = true;
 }
 
 function normalizedId(value: unknown) {
@@ -295,6 +337,54 @@ async function handleDetailCollect(target: MonitorTargetVo) {
   }
   await handleCollect(target);
   await loadCompetitorDetail();
+}
+
+function handleSubmitManualTarget() {
+  if (!detailCompetitor.value) {
+    ElMessage.warning('先选择一个竞品');
+    return;
+  }
+  const title = manualTargetForm.title.trim();
+  const url = manualTargetForm.url.trim();
+  const analysisNotes = manualTargetForm.analysisNotes.trim();
+  if (!title || !url) {
+    ElMessage.warning('请填写目标标题和 URL');
+    return;
+  }
+  if (/\s/.test(url)) {
+    ElMessage.warning('URL 不能包含空格');
+    return;
+  }
+  if (editingManualDraft.value) {
+    Object.assign(editingManualDraft.value, {
+      type: manualTargetForm.type,
+      title,
+      url,
+      analysisNotes: analysisNotes || undefined,
+      selected: true,
+      validationStatus: 'pending',
+      validationMessage: '保存时验活；通过后才会进入 active 监控',
+    });
+    manualTargetDialogVisible.value = false;
+    return;
+  }
+  drafts.value.unshift({
+    competitorId: detailCompetitor.value.id,
+    competitorName: detailCompetitor.value.name,
+    type: manualTargetForm.type,
+    title,
+    url,
+    status: 'draft',
+    confidence: 1,
+    source: 'manual',
+    analysisNotes: analysisNotes || undefined,
+    selected: true,
+    validationStatus: 'pending',
+    validationMessage: '保存时验活；通过后才会进入 active 监控',
+    collectStatus: 'idle',
+  });
+  manualTargetDialogVisible.value = false;
+  resetManualTargetForm();
 }
 
 function formatPercent(value: number) {
@@ -422,6 +512,8 @@ async function handleConfirmDrafts(competitorId?: number) {
         type: draft.type,
         title: draft.title,
         url: draft.url,
+        source: draft.source,
+        analysisNotes: draft.analysisNotes,
       });
       if (!created?.id) {
         throw new Error('验活失败，后端未返回 active 目标');
@@ -438,7 +530,6 @@ async function handleConfirmDrafts(competitorId?: number) {
       draft.validationStatus = 'failed';
       draft.validationMessage = errorMessage(error, '验活失败，未入库');
       draft.collectStatus = 'failed';
-      processedDraftKeys.add(draftKey(draft));
     }
   }
   if (saved.length > 0) {
@@ -446,7 +537,7 @@ async function handleConfirmDrafts(competitorId?: number) {
   }
   drafts.value = drafts.value.filter(draft => !processedDraftKeys.has(draftKey(draft)));
   if (failedCount > 0) {
-    ElMessage.warning(`已保存 ${saved.length} 个目标，${failedCount} 个目标验活失败，已从候选列表移除`);
+    ElMessage.warning(`已保存 ${saved.length} 个目标，${failedCount} 个目标验活失败，已保留在候选列表`);
     return saved;
   }
   ElMessage.success('监控目标已确认');
@@ -658,7 +749,7 @@ function toDraftTarget(target: MonitorTargetVo): DraftTarget {
   return {
     ...target,
     selected: true,
-    source: 'rule_fallback',
+    source: target.source || 'rule_fallback',
     validationStatus: 'pending',
     validationMessage: '保存时验活；通过后才会进入 active 监控',
     collectStatus: 'idle',
@@ -668,6 +759,7 @@ function toDraftTarget(target: MonitorTargetVo): DraftTarget {
 function sourceLabel(source: DraftSource) {
   return {
     homepage_link: '官网发现',
+    html_link: '页面链接',
     feed_hint: 'Feed 发现',
     rule_fallback: '规则补全',
     manual: '手动添加',
@@ -1136,6 +1228,9 @@ function errorMessage(error: unknown, fallback: string) {
                 <el-button size="small" :icon="Aim" :loading="discoveryLoading" @click="handleDetailRecommendTargets">
                   发现监控页
                 </el-button>
+                <el-button size="small" :icon="Plus" @click="openManualTargetDialog()">
+                  手动添加目标
+                </el-button>
                 <el-button
                   v-if="detailDrafts.length"
                   size="small"
@@ -1164,8 +1259,21 @@ function errorMessage(error: unknown, fallback: string) {
                     <el-tag size="small" :type="validationType(draft.validationStatus)" effect="light">
                       {{ validationLabel(draft.validationStatus) }}
                     </el-tag>
+                    <el-button
+                      v-if="draft.source === 'manual'"
+                      link
+                      size="small"
+                      type="primary"
+                      :icon="Edit"
+                      @click="openManualTargetDialog(draft)"
+                    >
+                      编辑
+                    </el-button>
                   </div>
                   <el-input v-model="draft.url" />
+                  <p v-if="draft.analysisNotes">
+                    关注点：{{ draft.analysisNotes }}
+                  </p>
                   <p>{{ draft.validationMessage }}</p>
                 </div>
               </div>
@@ -1319,6 +1427,54 @@ function errorMessage(error: unknown, fallback: string) {
           </el-button>
           <el-button type="primary" :icon="Plus" @click="handleCreateCompetitor">
             保存竞品
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="manualTargetDialogVisible"
+      align-center
+      class="competitor-dialog"
+      width="520px"
+      :title="manualTargetDialogTitle"
+      @closed="resetManualTargetForm"
+    >
+      <el-form label-position="top" @submit.prevent="handleSubmitManualTarget">
+        <el-form-item label="类型" required>
+          <el-select v-model="manualTargetForm.type" class="full-width">
+            <el-option
+              v-for="(label, value) in targetTypeLabels"
+              :key="value"
+              :label="label"
+              :value="value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标题" required>
+          <el-input v-model="manualTargetForm.title" placeholder="例如 Pricing / Docs / RSS" />
+        </el-form-item>
+        <el-form-item label="URL" required>
+          <el-input v-model="manualTargetForm.url" placeholder="https://example.com/pricing" />
+        </el-form-item>
+        <el-form-item label="分析关注点">
+          <el-input
+            v-model="manualTargetForm.analysisNotes"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            type="textarea"
+            placeholder="例如关注套餐变化、API 文档更新或产品定位变化"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="manualTargetDialogVisible = false">
+            取消
+          </el-button>
+          <el-button type="primary" :icon="editingManualDraft ? Edit : Plus" @click="handleSubmitManualTarget">
+            {{ editingManualDraft ? '保存修改' : '加入待确认' }}
           </el-button>
         </div>
       </template>
@@ -1806,6 +1962,9 @@ function errorMessage(error: unknown, fallback: string) {
   color: var(--ci-text-secondary);
   font-size: 13px;
   font-weight: 500;
+}
+.full-width {
+  width: 100%;
 }
 .row-actions {
   display: inline-flex;

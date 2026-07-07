@@ -32,15 +32,20 @@ export interface MonitorTargetVo {
   status: 'active' | 'draft' | 'paused';
   confidence: number;
   lastCollectedAt?: string;
+  source?: MonitorTargetSource;
+  analysisNotes?: string;
 }
 
 export type MonitorTargetType = 'official_site' | 'pricing' | 'docs' | 'blog' | 'changelog' | 'rss';
+export type MonitorTargetSource = 'homepage_link' | 'html_link' | 'feed_hint' | 'rule_fallback' | 'manual';
 
 export interface MonitorTargetRequest {
   competitorId: number;
   type: MonitorTargetType;
   title: string;
   url: string;
+  source?: MonitorTargetSource;
+  analysisNotes?: string;
 }
 
 export interface ReportSummaryVo {
