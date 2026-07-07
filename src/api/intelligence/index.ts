@@ -4,6 +4,7 @@ import type {
   CompetitorVo,
   FeedbackValue,
   MonitorTargetRequest,
+  MonitorTargetScheduleRequest,
   MonitorTargetVo,
   ReportDetailVo,
   ReportSummaryVo,
@@ -70,8 +71,13 @@ export function deleteMonitorTarget(id: number) {
   return unwrap<void>(del<void>(`/intelligence/targets/${id}`).json());
 }
 
-export function triggerTargetCollect(id: number) {
-  return unwrap<TaskRunVo>(post<TaskRunVo>(`/intelligence/targets/${id}/collect`).json());
+export function updateMonitorTargetSchedule(id: number, data: MonitorTargetScheduleRequest) {
+  return unwrap<MonitorTargetVo>(put<MonitorTargetVo>(`/intelligence/targets/${id}/schedule`, data).json());
+}
+
+export function triggerTargetCollect(id: number, triggerSource?: 'manual' | 'competitor_manual') {
+  const query = triggerSource ? `?triggerSource=${triggerSource}` : '';
+  return unwrap<TaskRunVo>(post<TaskRunVo>(`/intelligence/targets/${id}/collect${query}`).json());
 }
 
 export function listInboxReports(competitorId?: number) {

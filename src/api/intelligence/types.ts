@@ -34,10 +34,21 @@ export interface MonitorTargetVo {
   lastCollectedAt?: string;
   source?: MonitorTargetSource;
   analysisNotes?: string;
+  scheduleEnabled?: boolean;
+  scheduleMode?: ScheduleMode;
+  scheduleTime?: string;
+  scheduleWeekday?: number;
+  scheduleCron?: string;
+  nextCollectAt?: string;
+  lastScheduledAt?: string;
+  lastScheduledStatus?: string;
+  lastScheduledMessage?: string;
 }
 
 export type MonitorTargetType = 'official_site' | 'pricing' | 'docs' | 'blog' | 'changelog' | 'rss';
 export type MonitorTargetSource = 'homepage_link' | 'html_link' | 'feed_hint' | 'rule_fallback' | 'manual';
+export type ScheduleMode = 'off' | 'daily' | 'weekly' | 'cron';
+export type TaskTriggerSource = 'manual' | 'competitor_manual' | 'scheduled';
 
 export interface MonitorTargetRequest {
   competitorId: number;
@@ -46,6 +57,14 @@ export interface MonitorTargetRequest {
   url: string;
   source?: MonitorTargetSource;
   analysisNotes?: string;
+}
+
+export interface MonitorTargetScheduleRequest {
+  scheduleEnabled: boolean;
+  scheduleMode: ScheduleMode;
+  scheduleTime?: string;
+  scheduleWeekday?: number;
+  scheduleCron?: string;
 }
 
 export interface ReportSummaryVo {
@@ -91,6 +110,8 @@ export interface TaskRunVo {
   status: 'queued' | 'running' | 'success' | 'failed';
   adapter: string;
   message: string;
+  triggerSource?: TaskTriggerSource;
+  reportId?: number;
   startedAt: string;
   finishedAt?: string;
 }
