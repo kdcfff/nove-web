@@ -2,10 +2,12 @@
 import type {
   CompetitorVo,
   FeedbackValue,
+  MonitorTargetScheduleRequest,
   MonitorTargetSource,
   MonitorTargetVo,
   ReportDetailVo,
   ReportSummaryVo,
+  ScheduleMode,
   TaskCompareVo,
   TaskRunVo,
 } from '@/api/intelligence/types';
@@ -38,6 +40,7 @@ import {
   recommendMonitorTargets,
   submitReportFeedback,
   triggerTargetCollect,
+  updateMonitorTargetSchedule,
   writeReportToKnowledge,
 } from '@/api/intelligence';
 
@@ -80,14 +83,17 @@ const competitorDialogVisible = ref(false);
 const competitorDetailDrawerVisible = ref(false);
 const taskCompareDrawerVisible = ref(false);
 const manualTargetDialogVisible = ref(false);
+const scheduleDialogVisible = ref(false);
 const competitorDetailLoading = ref(false);
 const taskCompareLoading = ref(false);
+const scheduleSaving = ref(false);
 const detailCompetitor = ref<CompetitorVo | null>(null);
 const detailTargets = ref<MonitorTargetVo[]>([]);
 const detailReports = ref<ReportSummaryVo[]>([]);
 const detailTasks = ref<TaskRunVo[]>([]);
 const selectedTaskCompare = ref<TaskCompareVo | null>(null);
 const editingManualDraft = ref<DraftTarget | null>(null);
+const scheduleTarget = ref<MonitorTargetVo | null>(null);
 let detailLoadSeq = 0;
 
 const competitorForm = reactive({
@@ -101,6 +107,14 @@ const manualTargetForm = reactive({
   title: '',
   url: '',
   analysisNotes: '',
+});
+
+const scheduleForm = reactive<MonitorTargetScheduleRequest>({
+  scheduleEnabled: false,
+  scheduleMode: 'off',
+  scheduleTime: '09:00:00',
+  scheduleWeekday: 1,
+  scheduleCron: '0 0 9 * * *',
 });
 
 const hasReports = computed(() => reports.value.length > 0);
@@ -173,6 +187,29 @@ const taskStatusTypes: Record<TaskRunVo['status'], TagType> = {
   failed: 'danger',
 };
 
+const scheduleModeLabels: Record<ScheduleMode, string> = {
+  off: '关闭',
+  daily: '每天',
+  weekly: '每周',
+  cron: 'Cron',
+};
+
+const weekdayLabels: Record<number, string> = {
+  1: '周一',
+  2: '周二',
+  3: '周三',
+  4: '周四',
+  5: '周五',
+  6: '周六',
+  7: '周日',
+};
+
+const triggerSourceLabels: Record<string, string> = {
+  manual: '手动',
+  competitor_manual: '一键采集',
+  scheduled: '定时',
+};
+
 const feedbackLabels: Record<FeedbackValue, string> = {
   useful: '有帮助',
   not_useful: '不相关',
@@ -222,6 +259,18 @@ function openManualTargetDialog(draft?: DraftTarget) {
     resetManualTargetForm();
   }
   manualTargetDialogVisible.value = true;
+}
+
+function openScheduleDialog(target: MonitorTargetVo) {
+  scheduleTarget.value = target;
+  Object.assign(scheduleForm, {
+    scheduleEnabled: Boolean(target.scheduleEnabled),
+    scheduleMode: target.scheduleEnabled ? (target.scheduleMode || 'daily') : 'off',
+    scheduleTime: normalizeScheduleTime(target.scheduleTime) || '09:00:00',
+    scheduleWeekday: target.scheduleWeekday || 1,
+    scheduleCron: target.scheduleCron || '0 0 9 * * *',
+  });
+  scheduleDialogVisible.value = true;
 }
 
 function normalizedId(value: unknown) {
@@ -407,6 +456,17 @@ function formatTime(value?: string) {
   }).format(new Date(value));
 }
 
+function normalizeScheduleTime(value?: string) {
+  if (!value)
+    return '';
+  return value.length === 5 ? `${value}:00` : value;
+}
+
+function formatScheduleTime(value?: string) {
+  const time = normalizeScheduleTime(value);
+  return time ? time.slice(0, 5) : '-';
+}
+
 function targetTypeLabel(type: MonitorTargetVo['type']) {
   return targetTypeLabels[type];
 }
@@ -417,6 +477,52 @@ function taskStatusLabel(status: TaskRunVo['status']) {
 
 function taskStatusType(status: TaskRunVo['status']) {
   return taskStatusTypes[status];
+}
+
+function scheduleModeLabel(mode?: string) {
+  return scheduleModeLabels[(mode as ScheduleMode) || 'off'] || mode || '关闭';
+}
+
+function scheduleStateType(target: MonitorTargetVo): TagType {
+  return target.scheduleEnabled && target.scheduleMode !== 'off' ? 'success' : 'info';
+}
+
+function scheduleStateLabel(target: MonitorTargetVo) {
+  if (!target.scheduleEnabled || target.scheduleMode === 'off')
+    return '关闭';
+  if (target.scheduleMode === 'weekly')
+    return `${weekdayLabels[target.scheduleWeekday || 1] || '每周'} ${formatScheduleTime(target.scheduleTime)}`;
+  if (target.scheduleMode === 'cron')
+    return 'Cron';
+  return `${scheduleModeLabel(target.scheduleMode)} ${formatScheduleTime(target.scheduleTime)}`;
+}
+
+function scheduledResultType(status?: string): TagType {
+  if (status === 'success')
+    return 'success';
+  if (status === 'failed')
+    return 'danger';
+  if (status === 'running' || status === 'queued')
+    return 'warning';
+  return 'info';
+}
+
+function scheduledResultLabel(status?: string) {
+  if (!status)
+    return '暂无';
+  return taskStatusLabels[status as TaskRunVo['status']] || status;
+}
+
+function triggerSourceLabel(source?: string) {
+  return triggerSourceLabels[source || 'manual'] || source || '手动';
+}
+
+function triggerSourceType(source?: string): TagType {
+  if (source === 'scheduled')
+    return 'success';
+  if (source === 'competitor_manual')
+    return 'primary';
+  return 'info';
 }
 
 function priorityType(priority: ReportSummaryVo['priority']) {
@@ -609,6 +715,82 @@ async function handleCollect(target: MonitorTargetVo) {
   }
 }
 
+function handleScheduleEnabledChange(enabled: unknown) {
+  const isEnabled = Boolean(enabled);
+  if (isEnabled && scheduleForm.scheduleMode === 'off')
+    scheduleForm.scheduleMode = 'daily';
+  if (!isEnabled)
+    scheduleForm.scheduleMode = 'off';
+}
+
+function handleScheduleModeChange(mode: string) {
+  scheduleForm.scheduleEnabled = mode !== 'off';
+}
+
+function schedulePayload(): MonitorTargetScheduleRequest {
+  if (!scheduleForm.scheduleEnabled || scheduleForm.scheduleMode === 'off') {
+    return {
+      scheduleEnabled: false,
+      scheduleMode: 'off',
+    };
+  }
+
+  const payload: MonitorTargetScheduleRequest = {
+    scheduleEnabled: true,
+    scheduleMode: scheduleForm.scheduleMode,
+  };
+  if (scheduleForm.scheduleMode === 'daily' || scheduleForm.scheduleMode === 'weekly')
+    payload.scheduleTime = normalizeScheduleTime(scheduleForm.scheduleTime);
+  if (scheduleForm.scheduleMode === 'weekly')
+    payload.scheduleWeekday = scheduleForm.scheduleWeekday;
+  if (scheduleForm.scheduleMode === 'cron')
+    payload.scheduleCron = scheduleForm.scheduleCron?.trim();
+  return payload;
+}
+
+function validateScheduleForm() {
+  if (!scheduleForm.scheduleEnabled || scheduleForm.scheduleMode === 'off')
+    return true;
+  if ((scheduleForm.scheduleMode === 'daily' || scheduleForm.scheduleMode === 'weekly') && !scheduleForm.scheduleTime) {
+    ElMessage.warning('请选择执行时间');
+    return false;
+  }
+  if (scheduleForm.scheduleMode === 'weekly' && !scheduleForm.scheduleWeekday) {
+    ElMessage.warning('请选择星期');
+    return false;
+  }
+  if (scheduleForm.scheduleMode === 'cron' && !scheduleForm.scheduleCron?.trim()) {
+    ElMessage.warning('请填写 Cron 表达式');
+    return false;
+  }
+  return true;
+}
+
+function syncUpdatedTarget(updated: MonitorTargetVo) {
+  detailTargets.value = detailTargets.value.map(target => sameId(target.id, updated.id) ? updated : target);
+  targets.value = targets.value.map(target => sameId(target.id, updated.id) ? updated : target);
+}
+
+async function handleSaveSchedule() {
+  if (!scheduleTarget.value?.id || !validateScheduleForm())
+    return;
+  scheduleSaving.value = true;
+  try {
+    const updated = await updateMonitorTargetSchedule(scheduleTarget.value.id, schedulePayload());
+    syncUpdatedTarget(updated);
+    scheduleTarget.value = updated;
+    scheduleDialogVisible.value = false;
+    await loadCompetitorDetail();
+    ElMessage.success('定时采集已更新');
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '定时设置保存失败'));
+  }
+  finally {
+    scheduleSaving.value = false;
+  }
+}
+
 async function refreshAfterCollect(competitorId?: number) {
   const [competitorData, targetData, reportData] = await Promise.all([
     listCompetitors(),
@@ -647,7 +829,7 @@ async function handleCollectCompetitorTargets(competitor: CompetitorVo) {
       if (!target.id)
         continue;
       try {
-        await triggerTargetCollect(target.id);
+        await triggerTargetCollect(target.id, 'competitor_manual');
         successCount += 1;
       }
       catch {
@@ -757,6 +939,22 @@ async function openReport(report: ReportSummaryVo) {
       await markReportRead(report.id);
       report.read = true;
     }
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '报告详情加载失败'));
+  }
+}
+
+async function openReportById(reportId?: number) {
+  if (!reportId)
+    return;
+  try {
+    selectedReport.value = await getReportDetail(reportId);
+    if (!selectedReport.value.read) {
+      await markReportRead(reportId);
+      selectedReport.value.read = true;
+    }
+    activeView.value = 'reports';
   }
   catch (error) {
     ElMessage.error(errorMessage(error, '报告详情加载失败'));
@@ -1177,8 +1375,15 @@ function errorMessage(error: unknown, fallback: string) {
                 </div>
               </div>
             </template>
-            <el-table v-loading="taskLoading" :data="tasks" height="260" empty-text="暂无采集任务">
+            <el-table v-loading="taskLoading" :data="tasks" height="320" empty-text="暂无采集任务">
               <el-table-column prop="targetTitle" label="目标" min-width="180" />
+              <el-table-column label="来源" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="triggerSourceType(row.triggerSource)" effect="plain">
+                    {{ triggerSourceLabel(row.triggerSource) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column label="状态" width="100">
                 <template #default="{ row }">
                   <el-tag :type="taskStatusType(row.status)" effect="light">
@@ -1193,11 +1398,27 @@ function errorMessage(error: unknown, fallback: string) {
                   {{ formatTime(row.startedAt) }}
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="90">
+              <el-table-column label="完成时间" width="130">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="openTaskCompare(row)">
-                    对比
-                  </el-button>
+                  {{ formatTime(row.finishedAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="174">
+                <template #default="{ row }">
+                  <div class="row-actions">
+                    <el-button size="small" text type="primary" @click="openTaskCompare(row)">
+                      对比
+                    </el-button>
+                    <el-button
+                      v-if="row.reportId"
+                      size="small"
+                      text
+                      type="primary"
+                      @click="openReportById(row.reportId)"
+                    >
+                      报告
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -1210,7 +1431,7 @@ function errorMessage(error: unknown, fallback: string) {
       v-model="competitorDetailDrawerVisible"
       class="competitor-detail-drawer"
       direction="rtl"
-      size="720px"
+      size="880px"
       :with-header="false"
     >
       <section v-loading="competitorDetailLoading" class="drawer-workspace">
@@ -1336,8 +1557,8 @@ function errorMessage(error: unknown, fallback: string) {
             <div class="section-title-row">
               <h3>已监控目标</h3>
             </div>
-            <el-table :data="detailTargets" height="220" empty-text="还没有已监控目标">
-              <el-table-column label="目标" min-width="150" show-overflow-tooltip>
+            <el-table :data="detailTargets" height="260" empty-text="还没有已监控目标">
+              <el-table-column label="目标" min-width="170" show-overflow-tooltip>
                 <template #default="{ row }">
                   <el-link :href="row.url" target="_blank" :icon="Link" type="primary">
                     {{ row.title }}
@@ -1358,11 +1579,43 @@ function errorMessage(error: unknown, fallback: string) {
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="150">
+              <el-table-column label="定时" width="118">
+                <template #default="{ row }">
+                  <el-tag :type="scheduleStateType(row)" effect="light">
+                    {{ scheduleStateLabel(row) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="下次执行" width="126">
+                <template #default="{ row }">
+                  {{ formatTime(row.nextCollectAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="上次定时" width="126">
+                <template #default="{ row }">
+                  {{ formatTime(row.lastScheduledAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="结果" width="118" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <el-tooltip
+                    :content="row.lastScheduledMessage || '暂无定时采集结果'"
+                    placement="top"
+                  >
+                    <el-tag :type="scheduledResultType(row.lastScheduledStatus)" effect="plain">
+                      {{ scheduledResultLabel(row.lastScheduledStatus) }}
+                    </el-tag>
+                  </el-tooltip>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="174">
                 <template #default="{ row }">
                   <div class="row-actions">
                     <el-button size="small" @click="handleDetailCollect(row)">
                       采集
+                    </el-button>
+                    <el-button size="small" text type="primary" @click="openScheduleDialog(row)">
+                      定时
                     </el-button>
                     <el-button
                       size="small"
@@ -1429,10 +1682,17 @@ function errorMessage(error: unknown, fallback: string) {
 
           <section class="drawer-section">
             <div class="section-title-row">
-              <h3>该竞品采集任务</h3>
+              <h3>采集历史</h3>
             </div>
-            <el-table :data="detailTasks" height="220" empty-text="暂无该竞品采集任务">
+            <el-table :data="detailTasks" height="260" empty-text="暂无该竞品采集历史">
               <el-table-column prop="targetTitle" label="目标" min-width="160" show-overflow-tooltip />
+              <el-table-column label="来源" width="96">
+                <template #default="{ row }">
+                  <el-tag :type="triggerSourceType(row.triggerSource)" effect="plain">
+                    {{ triggerSourceLabel(row.triggerSource) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column label="状态" width="86">
                 <template #default="{ row }">
                   <el-tag :type="taskStatusType(row.status)" effect="light">
@@ -1441,12 +1701,33 @@ function errorMessage(error: unknown, fallback: string) {
                 </template>
               </el-table-column>
               <el-table-column prop="adapter" label="采集器" width="120" />
-              <el-table-column prop="message" label="结果" min-width="180" show-overflow-tooltip />
-              <el-table-column label="操作" width="86">
+              <el-table-column label="开始" width="118">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="openTaskCompare(row)">
-                    对比
-                  </el-button>
+                  {{ formatTime(row.startedAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="完成" width="118">
+                <template #default="{ row }">
+                  {{ formatTime(row.finishedAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="message" label="结果" min-width="180" show-overflow-tooltip />
+              <el-table-column label="操作" width="136">
+                <template #default="{ row }">
+                  <div class="row-actions">
+                    <el-button size="small" text type="primary" @click="openTaskCompare(row)">
+                      对比
+                    </el-button>
+                    <el-button
+                      v-if="row.reportId"
+                      size="small"
+                      text
+                      type="primary"
+                      @click="openReportById(row.reportId)"
+                    >
+                      报告
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -1721,6 +2002,85 @@ function errorMessage(error: unknown, fallback: string) {
           </el-button>
           <el-button type="primary" :icon="editingManualDraft ? Edit : Plus" @click="handleSubmitManualTarget">
             {{ editingManualDraft ? '保存修改' : '加入待确认' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="scheduleDialogVisible"
+      align-center
+      class="competitor-dialog schedule-dialog"
+      width="520px"
+      title="定时采集设置"
+    >
+      <el-form label-position="top" @submit.prevent="handleSaveSchedule">
+        <el-form-item label="监控目标">
+          <div class="schedule-target-summary">
+            <strong>{{ scheduleTarget?.title || '-' }}</strong>
+            <el-link v-if="scheduleTarget?.url" :href="scheduleTarget.url" target="_blank" :icon="Link">
+              {{ scheduleTarget.url }}
+            </el-link>
+          </div>
+        </el-form-item>
+        <el-form-item label="启用定时采集">
+          <el-switch
+            v-model="scheduleForm.scheduleEnabled"
+            active-text="启用"
+            inactive-text="关闭"
+            @change="handleScheduleEnabledChange"
+          />
+        </el-form-item>
+        <el-form-item label="执行模式">
+          <el-select
+            v-model="scheduleForm.scheduleMode"
+            class="full-width"
+            @change="handleScheduleModeChange"
+          >
+            <el-option
+              v-for="(label, value) in scheduleModeLabels"
+              :key="value"
+              :label="label"
+              :value="value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="scheduleForm.scheduleMode === 'daily' || scheduleForm.scheduleMode === 'weekly'" label="执行时间" required>
+          <el-time-picker
+            v-model="scheduleForm.scheduleTime"
+            class="full-width"
+            format="HH:mm"
+            value-format="HH:mm:ss"
+            placeholder="选择执行时间"
+          />
+        </el-form-item>
+        <el-form-item v-if="scheduleForm.scheduleMode === 'weekly'" label="星期" required>
+          <el-select v-model="scheduleForm.scheduleWeekday" class="full-width">
+            <el-option
+              v-for="(label, value) in weekdayLabels"
+              :key="value"
+              :label="label"
+              :value="Number(value)"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="scheduleForm.scheduleMode === 'cron'" label="Cron 表达式" required>
+          <el-input v-model="scheduleForm.scheduleCron" placeholder="例如 0 0 9 * * *" />
+        </el-form-item>
+        <el-alert
+          show-icon
+          type="info"
+          :closable="false"
+          title="手动采集不会改变定时设置；定时执行失败后仍会计算下一次执行时间。"
+        />
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="scheduleDialogVisible = false">
+            取消
+          </el-button>
+          <el-button type="primary" :loading="scheduleSaving" @click="handleSaveSchedule">
+            保存设置
           </el-button>
         </div>
       </template>
@@ -2220,6 +2580,18 @@ function errorMessage(error: unknown, fallback: string) {
 }
 .tooltip-button-wrap {
   display: inline-flex;
+}
+.schedule-target-summary {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  strong {
+    line-height: 20px;
+  }
+  :deep(.el-link) {
+    justify-content: flex-start;
+    min-width: 0;
+  }
 }
 .form-card,
 .table-card {
