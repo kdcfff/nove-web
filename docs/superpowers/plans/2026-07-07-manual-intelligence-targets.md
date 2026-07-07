@@ -2,6 +2,7 @@
 change: add-manual-intelligence-targets
 design-doc: docs/superpowers/specs/2026-07-07-manual-intelligence-targets-design.md
 base-ref: c39d3ce7e1d742f12b4cd4a482787a0df6ff2a2c
+archived-with: 2026-07-07-add-manual-intelligence-targets
 ---
 
 # Manual Intelligence Targets Implementation Plan
@@ -23,6 +24,7 @@ base-ref: c39d3ce7e1d742f12b4cd4a482787a0df6ff2a2c
 - Manual targets must use the existing collection, baseline, diff, report, task, delete, and one-click collection flows.
 - Backend fields must be nullable and backward-compatible with existing callers.
 
+archived-with: 2026-07-07-add-manual-intelligence-targets
 ---
 
 ## File Structure
@@ -468,3 +470,4 @@ Expected: both repositories have commits for their respective changes, with no u
 - Spec coverage: manual entry, provenance retention, analysis notes context, validation gating, RSS failure, one-click collection, existing pipeline, and verification are covered by Tasks 1-5.
 - Placeholder scan: no unresolved implementation markers are used.
 - Type consistency: `source` and `analysisNotes` names are consistent across backend DTOs, entity, frontend types, request payload, and draft candidates.
+

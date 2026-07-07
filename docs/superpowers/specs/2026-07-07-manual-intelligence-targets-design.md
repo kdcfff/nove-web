@@ -2,6 +2,8 @@
 comet_change: add-manual-intelligence-targets
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-07-add-manual-intelligence-targets
+status: final
 ---
 
 # Manual Intelligence Targets Design
@@ -140,3 +142,4 @@ Smoke:
 ## Scope Boundaries
 
 This change does not add full candidate persistence, social/traffic/AI mention adapters, or a new LLM analysis prompt pipeline. Those remain future changes. The deliverable is a reliable user-defined target entry path that feeds the existing competitive intelligence pipeline.
+
