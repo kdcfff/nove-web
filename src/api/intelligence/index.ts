@@ -7,6 +7,7 @@ import type {
   MonitorTargetVo,
   ReportDetailVo,
   ReportSummaryVo,
+  TaskCompareVo,
   TaskRunVo,
 } from './types';
 import { del, get, post, put } from '@/utils/request';
@@ -95,4 +96,8 @@ export function writeReportToKnowledge(id: number) {
 
 export function listTaskRuns(competitorId?: number) {
   return unwrap<TaskRunVo[]>(get<TaskRunVo[]>('/intelligence/tasks', competitorId != null ? { competitorId } : undefined).json());
+}
+
+export function getTaskCompare(id: number) {
+  return unwrap<TaskCompareVo>(get<TaskCompareVo>(`/intelligence/tasks/${id}/compare`).json());
 }

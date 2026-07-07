@@ -6,6 +6,7 @@ import type {
   MonitorTargetVo,
   ReportDetailVo,
   ReportSummaryVo,
+  TaskCompareVo,
   TaskRunVo,
 } from '@/api/intelligence/types';
 import {
@@ -28,6 +29,7 @@ import {
   deleteCompetitor,
   deleteMonitorTarget,
   getReportDetail,
+  getTaskCompare,
   listCompetitors,
   listInboxReports,
   listMonitorTargets,
@@ -76,12 +78,15 @@ const reportPriority = ref<ReportSummaryVo['priority'] | 'all'>('all');
 const taskCompetitorFilter = ref<number | 'all'>('all');
 const competitorDialogVisible = ref(false);
 const competitorDetailDrawerVisible = ref(false);
+const taskCompareDrawerVisible = ref(false);
 const manualTargetDialogVisible = ref(false);
 const competitorDetailLoading = ref(false);
+const taskCompareLoading = ref(false);
 const detailCompetitor = ref<CompetitorVo | null>(null);
 const detailTargets = ref<MonitorTargetVo[]>([]);
 const detailReports = ref<ReportSummaryVo[]>([]);
 const detailTasks = ref<TaskRunVo[]>([]);
+const selectedTaskCompare = ref<TaskCompareVo | null>(null);
 const editingManualDraft = ref<DraftTarget | null>(null);
 let detailLoadSeq = 0;
 
@@ -420,6 +425,46 @@ function priorityType(priority: ReportSummaryVo['priority']) {
 
 function priorityLabel(priority: ReportSummaryVo['priority']) {
   return priorityLabels[priority];
+}
+
+function shortHash(value?: string) {
+  if (!value)
+    return '-';
+  return value.length > 22 ? `${value.slice(0, 14)}...${value.slice(-6)}` : value;
+}
+
+function formatNumber(value?: number) {
+  return value == null ? '-' : String(value);
+}
+
+function snapshotHash(snapshot: TaskCompareVo['newSnapshot'], key: string) {
+  return snapshot?.hashes?.[key] || '-';
+}
+
+function snapshotSignals(snapshot: TaskCompareVo['newSnapshot']) {
+  if (!snapshot)
+    return [];
+  return [
+    { label: '价格', values: snapshot.priceLikeText },
+    { label: '功能', values: snapshot.featureLikeText },
+    { label: '活动', values: snapshot.campaignLikeText },
+    { label: '客户', values: snapshot.customerLikeText },
+  ].filter(item => item.values.length > 0);
+}
+
+async function openTaskCompare(task: TaskRunVo) {
+  selectedTaskCompare.value = null;
+  taskCompareDrawerVisible.value = true;
+  taskCompareLoading.value = true;
+  try {
+    selectedTaskCompare.value = await getTaskCompare(task.id);
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '任务对比详情加载失败'));
+  }
+  finally {
+    taskCompareLoading.value = false;
+  }
 }
 
 onMounted(() => {
@@ -1148,6 +1193,13 @@ function errorMessage(error: unknown, fallback: string) {
                   {{ formatTime(row.startedAt) }}
                 </template>
               </el-table-column>
+              <el-table-column label="操作" width="90">
+                <template #default="{ row }">
+                  <el-button size="small" text type="primary" @click="openTaskCompare(row)">
+                    对比
+                  </el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </section>
@@ -1390,7 +1442,201 @@ function errorMessage(error: unknown, fallback: string) {
               </el-table-column>
               <el-table-column prop="adapter" label="采集器" width="120" />
               <el-table-column prop="message" label="结果" min-width="180" show-overflow-tooltip />
+              <el-table-column label="操作" width="86">
+                <template #default="{ row }">
+                  <el-button size="small" text type="primary" @click="openTaskCompare(row)">
+                    对比
+                  </el-button>
+                </template>
+              </el-table-column>
             </el-table>
+          </section>
+        </template>
+      </section>
+    </el-drawer>
+
+    <el-drawer
+      v-model="taskCompareDrawerVisible"
+      class="task-compare-drawer"
+      direction="rtl"
+      size="760px"
+      :with-header="false"
+    >
+      <section v-loading="taskCompareLoading" class="drawer-workspace compare-workspace">
+        <template v-if="selectedTaskCompare">
+          <header class="drawer-header">
+            <div>
+              <span class="eyebrow">Capture Compare</span>
+              <h2>{{ selectedTaskCompare.targetTitle }}</h2>
+              <el-link :href="selectedTaskCompare.url" target="_blank" :icon="Link">
+                {{ selectedTaskCompare.url }}
+              </el-link>
+            </div>
+            <div class="drawer-actions">
+              <el-button :icon="Close" aria-label="关闭对比" @click="taskCompareDrawerVisible = false" />
+            </div>
+          </header>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <div>
+                <h3>执行结论</h3>
+                <p>{{ selectedTaskCompare.compareSummary }}</p>
+              </div>
+              <el-tag :type="selectedTaskCompare.status === 'failed' ? 'danger' : 'success'" effect="light">
+                {{ selectedTaskCompare.status }}
+              </el-tag>
+            </div>
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="Task ID">
+                {{ selectedTaskCompare.taskId }}
+              </el-descriptions-item>
+              <el-descriptions-item label="Target ID">
+                {{ selectedTaskCompare.targetId }}
+              </el-descriptions-item>
+              <el-descriptions-item label="采集器">
+                {{ selectedTaskCompare.adapter || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="HTTP">
+                {{ selectedTaskCompare.statusCode || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="Markdown 行数">
+                {{ formatNumber(selectedTaskCompare.lineCount) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="内容 Hash">
+                {{ shortHash(selectedTaskCompare.contentHash) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="旧快照">
+                {{ selectedTaskCompare.oldSnapshotId || '首次基线' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="新快照">
+                {{ selectedTaskCompare.newSnapshotId || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="变化数">
+                {{ selectedTaskCompare.changeCount }}
+              </el-descriptions-item>
+              <el-descriptions-item label="报告">
+                {{ selectedTaskCompare.reportIds.length ? selectedTaskCompare.reportIds.join(', ') : '-' }}
+              </el-descriptions-item>
+            </el-descriptions>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>抓取诊断</h3>
+            </div>
+            <el-descriptions v-if="selectedTaskCompare.capture" :column="2" border>
+              <el-descriptions-item label="Raw Capture">
+                {{ selectedTaskCompare.capture.id }}
+              </el-descriptions-item>
+              <el-descriptions-item label="最终 URL">
+                {{ selectedTaskCompare.capture.finalUrl || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="质量分">
+                {{ formatNumber(selectedTaskCompare.capture.qualityScore) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="耗时">
+                {{ formatNumber(selectedTaskCompare.capture.durationMs) }} ms
+              </el-descriptions-item>
+              <el-descriptions-item label="渲染兜底">
+                {{ selectedTaskCompare.capture.fallbackUsed ? '是' : '否' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="兜底原因">
+                {{ selectedTaskCompare.capture.fallbackReason || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="错误">
+                {{ selectedTaskCompare.capture.errorMessage || '-' }}
+              </el-descriptions-item>
+            </el-descriptions>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>快照 Hash</h3>
+            </div>
+            <el-table
+              :data="[
+                { key: 'mainTextHash', old: snapshotHash(selectedTaskCompare.oldSnapshot, 'mainTextHash'), fresh: snapshotHash(selectedTaskCompare.newSnapshot, 'mainTextHash') },
+                { key: 'priceHash', old: snapshotHash(selectedTaskCompare.oldSnapshot, 'priceHash'), fresh: snapshotHash(selectedTaskCompare.newSnapshot, 'priceHash') },
+                { key: 'featureHash', old: snapshotHash(selectedTaskCompare.oldSnapshot, 'featureHash'), fresh: snapshotHash(selectedTaskCompare.newSnapshot, 'featureHash') },
+                { key: 'linkHash', old: snapshotHash(selectedTaskCompare.oldSnapshot, 'linkHash'), fresh: snapshotHash(selectedTaskCompare.newSnapshot, 'linkHash') },
+              ]" size="small" border
+            >
+              <el-table-column prop="key" label="字段" width="130" />
+              <el-table-column label="上次">
+                <template #default="{ row }">
+                  {{ shortHash(row.old) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="本次">
+                <template #default="{ row }">
+                  {{ shortHash(row.fresh) }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>字段变化</h3>
+            </div>
+            <el-empty v-if="selectedTaskCompare.changes.length === 0" description="未发现字段级变化" />
+            <div v-else class="compare-change-list">
+              <article v-for="change in selectedTaskCompare.changes" :key="`${change.source}-${change.id || change.fieldPath}`" class="evidence-block">
+                <header>
+                  <div>
+                    <strong>{{ change.changeKind }} / {{ change.fieldPath }}</strong>
+                    <p>{{ change.reasonCodes.join(', ') }}</p>
+                  </div>
+                  <el-tag effect="plain">
+                    {{ change.promotionStatus }}
+                  </el-tag>
+                </header>
+                <div class="diff-grid">
+                  <div class="diff-cell old">
+                    <span>上次</span>
+                    <p>{{ change.oldValue || '-' }}</p>
+                  </div>
+                  <div class="diff-cell fresh">
+                    <span>本次</span>
+                    <p>{{ change.newValue || '-' }}</p>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>结构化内容</h3>
+            </div>
+            <el-tabs>
+              <el-tab-pane label="本次信号">
+                <div class="signal-stack">
+                  <div v-for="signal in snapshotSignals(selectedTaskCompare.newSnapshot)" :key="signal.label" class="signal-group">
+                    <strong>{{ signal.label }}</strong>
+                    <p v-for="value in signal.values.slice(0, 8)" :key="value">
+                      {{ value }}
+                    </p>
+                  </div>
+                  <el-empty v-if="snapshotSignals(selectedTaskCompare.newSnapshot).length === 0" description="本次快照没有命中结构化信号" />
+                </div>
+              </el-tab-pane>
+              <el-tab-pane label="内容块">
+                <el-table :data="selectedTaskCompare.newSnapshot?.contentBlocks || []" height="260" size="small" empty-text="暂无内容块">
+                  <el-table-column prop="kind" label="类型" width="86" />
+                  <el-table-column prop="text" label="文本" min-width="260" show-overflow-tooltip />
+                  <el-table-column label="Hash" width="150">
+                    <template #default="{ row }">
+                      {{ shortHash(row.hash) }}
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-tab-pane>
+              <el-tab-pane label="原始 Markdown">
+                <pre class="markdown-preview">{{ selectedTaskCompare.capture?.markdown || '暂无 markdown' }}</pre>
+              </el-tab-pane>
+            </el-tabs>
           </section>
         </template>
       </section>
@@ -2034,6 +2280,43 @@ function errorMessage(error: unknown, fallback: string) {
 .drawer-baseline-summary {
   max-width: none;
   margin: 0;
+}
+.compare-workspace {
+  :deep(.el-descriptions__content) {
+    word-break: break-word;
+  }
+}
+.compare-change-list,
+.signal-stack {
+  display: grid;
+  gap: 12px;
+}
+.signal-group {
+  padding: 12px;
+  background: var(--ci-surface-raised);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  strong {
+    display: block;
+    margin-bottom: 8px;
+  }
+  p {
+    margin: 6px 0 0;
+    line-height: 1.55;
+    color: var(--ci-text-secondary);
+  }
+}
+.markdown-preview {
+  max-height: 360px;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0f172a;
+  color: #e5e7eb;
+  border-radius: 8px;
 }
 .drawer-candidate-list {
   display: grid;
