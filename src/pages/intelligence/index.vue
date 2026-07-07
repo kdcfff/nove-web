@@ -9,7 +9,9 @@ import type {
 } from '@/api/intelligence/types';
 import {
   Aim,
+  Close,
   Collection,
+  Delete,
   DocumentChecked,
   Link,
   Plus,
@@ -21,6 +23,8 @@ import {
 import {
   createCompetitor,
   createMonitorTarget,
+  deleteCompetitor,
+  deleteMonitorTarget,
   getReportDetail,
   listCompetitors,
   listInboxReports,
@@ -34,16 +38,48 @@ import {
 } from '@/api/intelligence';
 
 const loading = ref(false);
-const usingMock = ref(false);
-const activeView = ref<'inbox' | 'competitors' | 'targets'>('inbox');
+const discoveryLoading = ref(false);
+const startMonitoringLoading = ref(false);
+const deletingCompetitorId = ref<number>();
+const deletingTargetId = ref<number>();
+const taskLoading = ref(false);
+const collectingCompetitorIds = ref<number[]>([]);
+const pageError = ref('');
+const activeView = ref<'reports' | 'entities' | 'tasks'>('entities');
 const competitors = ref<CompetitorVo[]>([]);
 const targets = ref<MonitorTargetVo[]>([]);
 const reports = ref<ReportSummaryVo[]>([]);
 const tasks = ref<TaskRunVo[]>([]);
 const selectedReport = ref<ReportDetailVo | null>(null);
-const drafts = ref<MonitorTargetVo[]>([]);
+type DraftSource = 'homepage_link' | 'feed_hint' | 'rule_fallback' | 'manual';
+type ValidationStatus = 'pending' | 'success' | 'failed';
+type CollectionStatus = 'idle' | 'saving' | 'collecting' | 'baseline' | 'failed';
+type DraftTarget = MonitorTargetVo & {
+  selected: boolean;
+  source: DraftSource;
+  validationStatus: ValidationStatus;
+  validationMessage: string;
+  collectStatus: CollectionStatus;
+  collectMessage?: string;
+};
+
+const drafts = ref<DraftTarget[]>([]);
+const startupRuns = ref<Array<{
+  target: MonitorTargetVo;
+  status: 'waiting' | 'collecting' | 'baseline' | 'failed';
+  message: string;
+}>>([]);
 const reportKeyword = ref('');
 const reportPriority = ref<ReportSummaryVo['priority'] | 'all'>('all');
+const taskCompetitorFilter = ref<number | 'all'>('all');
+const competitorDialogVisible = ref(false);
+const competitorDetailDrawerVisible = ref(false);
+const competitorDetailLoading = ref(false);
+const detailCompetitor = ref<CompetitorVo | null>(null);
+const detailTargets = ref<MonitorTargetVo[]>([]);
+const detailReports = ref<ReportSummaryVo[]>([]);
+const detailTasks = ref<TaskRunVo[]>([]);
+let detailLoadSeq = 0;
 
 const competitorForm = reactive({
   name: '',
@@ -51,12 +87,20 @@ const competitorForm = reactive({
   positioning: '',
 });
 
-const selectedCompetitorId = computed(() => competitors.value[0]?.id);
 const hasReports = computed(() => reports.value.length > 0);
 const unreadCount = computed(() => reports.value.filter(item => !item.read).length);
 const activeTargetCount = computed(() => targets.value.filter(item => item.status === 'active').length);
 const highImpactCount = computed(() => reports.value.filter(item => ['high', 'urgent'].includes(item.priority)).length);
 const selectedReportId = computed(() => selectedReport.value?.id);
+const latestTask = computed(() => tasks.value[0]);
+const latestTaskTarget = computed(() => targets.value.find(item => item.id === latestTask.value?.targetId));
+const selectedTaskCompetitorId = computed(() => taskCompetitorFilter.value === 'all' ? undefined : taskCompetitorFilter.value);
+const detailHasBaseline = computed(() => detailTasks.value.some(task => task.status === 'success' && task.message.includes('基线')));
+const detailLatestTask = computed(() => detailTasks.value[0]);
+const detailDrafts = computed(() => detailCompetitor.value ? drafts.value.filter(draft => belongsToCompetitor(draft, detailCompetitor.value?.id)) : []);
+const detailStartupRuns = computed(() => detailCompetitor.value ? startupRuns.value.filter(run => belongsToCompetitor(run.target, detailCompetitor.value?.id)) : []);
+const detailUnreadCount = computed(() => detailReports.value.filter(report => !report.read).length);
+const detailSelectedDraftCount = computed(() => detailDrafts.value.filter(draft => draft.selected).length);
 const filteredReports = computed(() => reports.value.filter((report) => {
   const keyword = reportKeyword.value.trim().toLowerCase();
   const matchesKeyword = !keyword
@@ -113,9 +157,9 @@ const taskStatusTypes: Record<TaskRunVo['status'], TagType> = {
 };
 
 const feedbackLabels: Record<FeedbackValue, string> = {
-  useful: '有用',
-  not_useful: '没用',
-  false_positive: '误报',
+  useful: '有帮助',
+  not_useful: '不相关',
+  false_positive: '这是误报',
   handled: '已处理',
 };
 
@@ -124,6 +168,134 @@ const knowledgeStatusLabels: Record<ReportDetailVo['knowledgeWritebackStatus'], 
   written: '已写入',
   failed: '写入失败',
 };
+
+function openCompetitorDialog() {
+  competitorDialogVisible.value = true;
+}
+
+function resetCompetitorForm() {
+  Object.assign(competitorForm, { name: '', homepage: '', positioning: '' });
+}
+
+function normalizedId(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function sameId(left: unknown, right: unknown) {
+  const leftId = normalizedId(left);
+  const rightId = normalizedId(right);
+  return leftId !== undefined && rightId !== undefined && leftId === rightId;
+}
+
+function belongsToCompetitor(item: { competitorId?: number }, competitorId?: number) {
+  return sameId(item.competitorId, competitorId);
+}
+
+function activeTargetsForCompetitor(competitorId: number, source: MonitorTargetVo[] = targets.value) {
+  return source.filter(target => target.id && target.status === 'active' && belongsToCompetitor(target, competitorId));
+}
+
+function isCollectingCompetitor(competitorId: number) {
+  return collectingCompetitorIds.value.some(id => sameId(id, competitorId));
+}
+
+function setCollectingCompetitor(competitorId: number, collecting: boolean) {
+  if (collecting) {
+    if (!isCollectingCompetitor(competitorId))
+      collectingCompetitorIds.value = [...collectingCompetitorIds.value, competitorId];
+    return;
+  }
+  collectingCompetitorIds.value = collectingCompetitorIds.value.filter(id => !sameId(id, competitorId));
+}
+
+async function openCompetitorDetail(competitor: CompetitorVo) {
+  detailCompetitor.value = competitor;
+  detailTargets.value = [];
+  detailReports.value = [];
+  detailTasks.value = [];
+  competitorDetailDrawerVisible.value = true;
+  await loadCompetitorDetail();
+}
+
+async function loadCompetitorDetail() {
+  if (!detailCompetitor.value)
+    return;
+  const competitorId = detailCompetitor.value.id;
+  const requestSeq = ++detailLoadSeq;
+  competitorDetailLoading.value = true;
+  try {
+    const [targetData, reportData, taskData] = await Promise.all([
+      listMonitorTargets(competitorId),
+      listInboxReports(competitorId),
+      listTaskRuns(competitorId),
+    ]);
+    if (requestSeq !== detailLoadSeq || detailCompetitor.value?.id !== competitorId)
+      return;
+
+    const scopedTargets = targetData.filter(target => belongsToCompetitor(target, competitorId));
+    const scopedTargetIds = new Set(scopedTargets.map(target => normalizedId(target.id)));
+    detailTargets.value = scopedTargets;
+    detailReports.value = reportData.filter(report => belongsToCompetitor(report, competitorId));
+    detailTasks.value = taskData.filter(task => scopedTargetIds.has(normalizedId(task.targetId)));
+  }
+  catch (error) {
+    if (requestSeq !== detailLoadSeq || detailCompetitor.value?.id !== competitorId)
+      return;
+    ElMessage.error(errorMessage(error, '竞品详情加载失败'));
+    detailTargets.value = [];
+    detailReports.value = [];
+    detailTasks.value = [];
+  }
+  finally {
+    if (requestSeq === detailLoadSeq && detailCompetitor.value?.id === competitorId)
+      competitorDetailLoading.value = false;
+  }
+}
+
+async function handleDetailRecommendTargets() {
+  if (!detailCompetitor.value)
+    return;
+  discoveryLoading.value = true;
+  try {
+    const recommended = await recommendMonitorTargets({
+      competitorId: detailCompetitor.value.id,
+      homepage: detailCompetitor.value.homepage,
+    });
+    drafts.value = [
+      ...drafts.value.filter(draft => !belongsToCompetitor(draft, detailCompetitor.value?.id)),
+      ...recommended.map(toDraftTarget),
+    ];
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '监控目标发现失败'));
+  }
+  finally {
+    discoveryLoading.value = false;
+  }
+}
+
+async function handleDetailConfirmDrafts() {
+  if (startMonitoringLoading.value)
+    return;
+  startMonitoringLoading.value = true;
+  try {
+    await handleConfirmDrafts(detailCompetitor.value?.id);
+    await loadCompetitorDetail();
+  }
+  finally {
+    startMonitoringLoading.value = false;
+  }
+}
+
+async function handleDetailCollect(target: MonitorTargetVo) {
+  if (detailCompetitor.value && !belongsToCompetitor(target, detailCompetitor.value.id)) {
+    ElMessage.warning('该目标不属于当前竞品，已阻止操作');
+    return;
+  }
+  await handleCollect(target);
+  await loadCompetitorDetail();
+}
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -152,34 +324,67 @@ function taskStatusType(status: TaskRunVo['status']) {
   return taskStatusTypes[status];
 }
 
+function priorityType(priority: ReportSummaryVo['priority']) {
+  return priorityMap[priority];
+}
+
+function priorityLabel(priority: ReportSummaryVo['priority']) {
+  return priorityLabels[priority];
+}
+
 onMounted(() => {
   loadWorkbench();
 });
 
 async function loadWorkbench() {
   loading.value = true;
+  pageError.value = '';
   try {
     const [competitorData, targetData, reportData, taskData] = await Promise.all([
       listCompetitors(),
       listMonitorTargets(),
       listInboxReports(),
-      listTaskRuns(),
+      listTaskRuns(selectedTaskCompetitorId.value),
     ]);
     competitors.value = competitorData;
     targets.value = targetData;
     reports.value = reportData;
     tasks.value = taskData;
-    usingMock.value = false;
     if (reportData[0]) {
       await openReport(reportData[0]);
     }
+    else {
+      selectedReport.value = null;
+    }
   }
-  catch {
-    applyMockData();
+  catch (error) {
+    pageError.value = errorMessage(error, '工作台加载失败，请检查登录状态或后端服务');
+    competitors.value = [];
+    targets.value = [];
+    reports.value = [];
+    tasks.value = [];
+    selectedReport.value = null;
   }
   finally {
     loading.value = false;
   }
+}
+
+async function loadTaskRuns() {
+  taskLoading.value = true;
+  try {
+    tasks.value = await listTaskRuns(selectedTaskCompetitorId.value);
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '任务记录加载失败'));
+  }
+  finally {
+    taskLoading.value = false;
+  }
+}
+
+async function handleTaskCompetitorChange() {
+  await loadTaskRuns();
 }
 
 async function handleCreateCompetitor() {
@@ -190,55 +395,62 @@ async function handleCreateCompetitor() {
   try {
     const created = await createCompetitor({ ...competitorForm });
     competitors.value.unshift(created);
-    Object.assign(competitorForm, { name: '', homepage: '', positioning: '' });
+    resetCompetitorForm();
+    competitorDialogVisible.value = false;
     ElMessage.success('竞品已添加');
+    activeView.value = 'entities';
+    detailCompetitor.value = created;
+    competitorDetailDrawerVisible.value = true;
+    await loadCompetitorDetail();
+    await handleDetailRecommendTargets();
   }
-  catch {
-    const created = mockCompetitor(competitorForm.name, competitorForm.homepage, competitorForm.positioning);
-    competitors.value.unshift(created);
-    Object.assign(competitorForm, { name: '', homepage: '', positioning: '' });
-    usingMock.value = true;
-  }
-}
-
-async function handleRecommendTargets() {
-  const competitor = competitors.value.find(item => item.id === selectedCompetitorId.value);
-  if (!competitor) {
-    ElMessage.warning('先添加一个竞品');
-    return;
-  }
-  try {
-    drafts.value = await recommendMonitorTargets({
-      competitorId: competitor.id,
-      homepage: competitor.homepage,
-    });
-  }
-  catch {
-    drafts.value = mockDraftTargets(competitor);
-    usingMock.value = true;
+  catch (error) {
+    ElMessage.error(errorMessage(error, '竞品保存失败'));
   }
 }
 
-async function handleConfirmDrafts() {
-  const selectedDrafts = drafts.value.filter(item => item.status === 'draft');
+async function handleConfirmDrafts(competitorId?: number) {
+  const selectedDrafts = drafts.value.filter(item => item.selected && (competitorId === undefined || belongsToCompetitor(item, competitorId)));
   const saved: MonitorTargetVo[] = [];
+  const processedDraftKeys = new Set<string>();
+  let failedCount = 0;
   for (const draft of selectedDrafts) {
     try {
-      saved.push(await createMonitorTarget({
+      draft.collectStatus = 'saving';
+      const created = await createMonitorTarget({
         competitorId: draft.competitorId,
         type: draft.type,
         title: draft.title,
         url: draft.url,
-      }));
+      });
+      if (!created?.id) {
+        throw new Error('验活失败，后端未返回 active 目标');
+      }
+      saved.push(created);
+      processedDraftKeys.add(draftKey(draft));
+      draft.validationStatus = 'success';
+      draft.validationMessage = '已验活并保存为 active 目标';
+      draft.collectStatus = 'idle';
     }
-    catch {
-      saved.push({ ...draft, id: Date.now() + saved.length, status: 'active' });
-      usingMock.value = true;
+    catch (error) {
+      failedCount += 1;
+      draft.selected = false;
+      draft.validationStatus = 'failed';
+      draft.validationMessage = errorMessage(error, '验活失败，未入库');
+      draft.collectStatus = 'failed';
+      processedDraftKeys.add(draftKey(draft));
     }
   }
-  targets.value.unshift(...saved);
-  drafts.value = [];
+  if (saved.length > 0) {
+    targets.value.unshift(...saved);
+  }
+  drafts.value = drafts.value.filter(draft => !processedDraftKeys.has(draftKey(draft)));
+  if (failedCount > 0) {
+    ElMessage.warning(`已保存 ${saved.length} 个目标，${failedCount} 个目标验活失败，已从候选列表移除`);
+    return saved;
+  }
   ElMessage.success('监控目标已确认');
+  return saved;
 }
 
 async function handleCollect(target: MonitorTargetVo) {
@@ -246,17 +458,159 @@ async function handleCollect(target: MonitorTargetVo) {
     return;
   try {
     const task = await triggerTargetCollect(target.id);
-    tasks.value.unshift(task);
+    await loadTaskRuns();
     reports.value = await listInboxReports();
     if (reports.value[0]) {
       await openReport(reports.value[0]);
     }
+    else {
+      selectedReport.value = null;
+      ElMessage.info(task.message || '采集完成，未发现字段级有效变化');
+    }
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '采集失败'));
+  }
+}
+
+async function refreshAfterCollect(competitorId?: number) {
+  const [competitorData, targetData, reportData] = await Promise.all([
+    listCompetitors(),
+    listMonitorTargets(),
+    listInboxReports(),
+  ]);
+  competitors.value = competitorData;
+  targets.value = targetData;
+  reports.value = reportData;
+  await loadTaskRuns();
+  if (reportData[0]) {
+    await openReport(reportData[0]);
+  }
+  else {
+    selectedReport.value = null;
+  }
+  if (competitorDetailDrawerVisible.value && sameId(detailCompetitor.value?.id, competitorId)) {
+    await loadCompetitorDetail();
+  }
+}
+
+async function handleCollectCompetitorTargets(competitor: CompetitorVo) {
+  if (isCollectingCompetitor(competitor.id))
+    return;
+  setCollectingCompetitor(competitor.id, true);
+  let successCount = 0;
+  let failedCount = 0;
+  try {
+    const latestTargets = await listMonitorTargets(competitor.id);
+    const collectableTargets = activeTargetsForCompetitor(competitor.id, latestTargets);
+    if (collectableTargets.length === 0) {
+      ElMessage.warning('该竞品暂无已监控目标');
+      return;
+    }
+    for (const target of collectableTargets) {
+      if (!target.id)
+        continue;
+      try {
+        await triggerTargetCollect(target.id);
+        successCount += 1;
+      }
+      catch {
+        failedCount += 1;
+      }
+    }
+    await refreshAfterCollect(competitor.id);
+    if (failedCount > 0) {
+      ElMessage.warning(`「${competitor.name}」采集完成：成功 ${successCount} 个，失败 ${failedCount} 个`);
+      return;
+    }
+    ElMessage.success(`「${competitor.name}」采集完成：成功 ${successCount} 个`);
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '一键采集失败'));
+  }
+  finally {
+    setCollectingCompetitor(competitor.id, false);
+  }
+}
+
+async function handleDeleteCompetitor(competitor: CompetitorVo) {
+  try {
+    await ElMessageBox.confirm(
+      `删除「${competitor.name}」会同时移除它的监控目标、任务记录和情报报告。`,
+      '删除竞品？',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+        type: 'warning',
+      },
+    );
   }
   catch {
-    const task = mockTask(target);
-    tasks.value.unshift(task);
-    reports.value.unshift(mockReport(target));
-    usingMock.value = true;
+    return;
+  }
+  deletingCompetitorId.value = competitor.id;
+  try {
+    await deleteCompetitor(competitor.id);
+    if (sameId(taskCompetitorFilter.value, competitor.id)) {
+      taskCompetitorFilter.value = 'all';
+    }
+    if (detailCompetitor.value?.id === competitor.id) {
+      competitorDetailDrawerVisible.value = false;
+      detailCompetitor.value = null;
+      detailTargets.value = [];
+      detailReports.value = [];
+      detailTasks.value = [];
+    }
+    drafts.value = drafts.value.filter(draft => !belongsToCompetitor(draft, competitor.id));
+    startupRuns.value = startupRuns.value.filter(run => !belongsToCompetitor(run.target, competitor.id));
+    await loadWorkbench();
+    ElMessage.success('竞品已删除');
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '竞品删除失败'));
+  }
+  finally {
+    deletingCompetitorId.value = undefined;
+  }
+}
+
+async function handleDeleteTarget(target: MonitorTargetVo) {
+  if (!target.id)
+    return;
+  if (detailCompetitor.value && !belongsToCompetitor(target, detailCompetitor.value.id)) {
+    ElMessage.warning('该目标不属于当前竞品，已阻止删除');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `删除「${target.title}」会移除该目标的快照、任务记录和关联报告。`,
+      '删除监控目标？',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+        type: 'warning',
+      },
+    );
+  }
+  catch {
+    return;
+  }
+  deletingTargetId.value = target.id;
+  try {
+    await deleteMonitorTarget(target.id);
+    startupRuns.value = startupRuns.value.filter(run => run.target.id !== target.id);
+    await loadWorkbench();
+    if (competitorDetailDrawerVisible.value)
+      await loadCompetitorDetail();
+    ElMessage.success('监控目标已删除');
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '监控目标删除失败'));
+  }
+  finally {
+    deletingTargetId.value = undefined;
   }
 }
 
@@ -268,9 +622,8 @@ async function openReport(report: ReportSummaryVo) {
       report.read = true;
     }
   }
-  catch {
-    selectedReport.value = mockReportDetail(report);
-    usingMock.value = true;
+  catch (error) {
+    ElMessage.error(errorMessage(error, '报告详情加载失败'));
   }
 }
 
@@ -280,12 +633,8 @@ async function handleFeedback(value: FeedbackValue) {
   try {
     selectedReport.value = await submitReportFeedback(selectedReport.value.id, value);
   }
-  catch {
-    const current = selectedReport.value;
-    if (!current)
-      return;
-    selectedReport.value = { ...current, feedback: value };
-    usingMock.value = true;
+  catch (error) {
+    ElMessage.error(errorMessage(error, '反馈提交失败'));
   }
 }
 
@@ -294,113 +643,64 @@ async function handleKnowledgeWriteback() {
     return;
   try {
     selectedReport.value = await writeReportToKnowledge(selectedReport.value.id);
+    ElMessage.success('已记录知识库写回状态');
   }
-  catch {
-    const current = selectedReport.value;
-    if (!current)
-      return;
-    selectedReport.value = { ...current, knowledgeWritebackStatus: 'written' };
-    usingMock.value = true;
+  catch (error) {
+    ElMessage.error(errorMessage(error, '知识库写入失败'));
   }
-  ElMessage.success('已记录知识库写回状态');
 }
 
-function applyMockData() {
-  const competitor = mockCompetitor('Comet', 'https://comet.example.com', 'Agentic coding workflow');
-  const target = mockTarget(competitor);
-  const report = mockReport(target);
-  competitors.value = [competitor];
-  targets.value = [target];
-  reports.value = [report];
-  tasks.value = [mockTask(target)];
-  selectedReport.value = mockReportDetail(report);
-  usingMock.value = true;
+function draftKey(draft: MonitorTargetVo) {
+  return `${draft.competitorId}:${draft.type}:${draft.url}`;
 }
 
-function mockCompetitor(name: string, homepage: string, positioning: string): CompetitorVo {
+function toDraftTarget(target: MonitorTargetVo): DraftTarget {
   return {
-    id: Date.now(),
-    name,
-    homepage,
-    positioning,
-    targetCount: 1,
-    unreadReportCount: 1,
-    updatedAt: new Date().toISOString(),
+    ...target,
+    selected: true,
+    source: 'rule_fallback',
+    validationStatus: 'pending',
+    validationMessage: '保存时验活；通过后才会进入 active 监控',
+    collectStatus: 'idle',
   };
 }
 
-function mockTarget(competitor: CompetitorVo): MonitorTargetVo {
+function sourceLabel(source: DraftSource) {
   return {
-    id: Date.now() + 1,
-    competitorId: competitor.id,
-    competitorName: competitor.name,
-    type: 'pricing',
-    title: `${competitor.name} Pricing`,
-    url: `${competitor.homepage}/pricing`,
-    status: 'active',
-    confidence: 0.86,
-  };
+    homepage_link: '官网发现',
+    feed_hint: 'Feed 发现',
+    rule_fallback: '规则补全',
+    manual: '手动添加',
+  }[source];
 }
 
-function mockDraftTargets(competitor: CompetitorVo): MonitorTargetVo[] {
-  return ['official_site', 'pricing', 'docs', 'blog', 'changelog', 'rss'].map((type, index) => ({
-    competitorId: competitor.id,
-    competitorName: competitor.name,
-    type: type as MonitorTargetVo['type'],
-    title: `${competitor.name} ${type}`,
-    url: `${competitor.homepage}/${type === 'official_site' ? '' : type}`,
-    status: 'draft',
-    confidence: 0.8 - index * 0.03,
-  }));
+function validationType(status: ValidationStatus): TagType {
+  return status === 'success' ? 'success' : status === 'failed' ? 'danger' : 'warning';
 }
 
-function mockTask(target: MonitorTargetVo): TaskRunVo {
-  return {
-    id: Date.now() + 2,
-    targetId: target.id || 0,
-    targetTitle: target.title,
-    status: 'success',
-    adapter: 'mock-firecrawl',
-    message: '已完成一次模拟采集',
-    startedAt: new Date().toISOString(),
-    finishedAt: new Date().toISOString(),
-  };
+function validationLabel(status: ValidationStatus) {
+  return status === 'success' ? '已验证' : status === 'failed' ? '验活失败' : '待验活';
 }
 
-function mockReport(target: MonitorTargetVo): ReportSummaryVo {
-  return {
-    id: Date.now() + 3,
-    competitorId: target.competitorId,
-    competitorName: target.competitorName,
-    targetId: target.id || 0,
-    targetType: target.type,
-    changeSummary: `${target.title} 出现关键字段更新`,
-    priority: 'high',
-    confidence: 0.82,
-    evidenceCount: 1,
-    read: false,
-    recommendedActionSummary: '检查自家对应页面',
-    createdAt: new Date().toISOString(),
-  };
+function startupRunType(status: 'waiting' | 'collecting' | 'baseline' | 'failed'): TagType {
+  return status === 'baseline' ? 'success' : status === 'failed' ? 'danger' : status === 'collecting' ? 'warning' : 'info';
 }
 
-function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
+function startupRunLabel(status: 'waiting' | 'collecting' | 'baseline' | 'failed') {
   return {
-    ...report,
-    sourceUrl: 'https://comet.example.com/pricing',
-    strategicIntent: '可能在强化商业化转化路径，并测试新的套餐表达。',
-    businessImpact: '需要评估 Nova 当前定价页、文档入口和销售话术是否需要同步调整。',
-    recommendedActions: ['检查自家对应页面', '补一条竞品对比证据', '决定是否写入知识库'],
-    evidence: [{
-      field: 'priceLikeText',
-      oldValue: 'Pro plan starts at $19',
-      newValue: 'Pro plan starts at $29 with annual discount',
-      snippet: 'pricing 字段出现金额与年付折扣变化',
-      sourceUrl: 'https://comet.example.com/pricing',
-    }],
-    reason: '规则评分命中 pricing 字段变化，AI mock 分析认为其商业影响较高。',
-    knowledgeWritebackStatus: 'none',
-  };
+    waiting: '等待中',
+    collecting: '采集中',
+    baseline: '基线已建立',
+    failed: '失败',
+  }[status];
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === 'object') {
+    const maybeResponse = error as { result?: { msg?: string }; message?: string };
+    return maybeResponse.result?.msg || maybeResponse.message || fallback;
+  }
+  return fallback;
 }
 </script>
 
@@ -414,13 +714,10 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
           <p>按证据审阅页面变化、RSS 更新、字段级 diff 和建议动作。</p>
         </div>
         <div class="header-actions">
-          <el-tag v-if="usingMock" type="warning" effect="plain">
-            Mock fallback
-          </el-tag>
           <el-button :icon="Refresh" @click="loadWorkbench">
             刷新
           </el-button>
-          <el-button type="primary" :icon="Plus" @click="activeView = 'competitors'">
+          <el-button type="primary" :icon="Plus" @click="openCompetitorDialog">
             添加竞品
           </el-button>
         </div>
@@ -440,7 +737,7 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
     </section>
 
     <el-tabs v-model="activeView" class="workbench-tabs">
-      <el-tab-pane label="情报收件箱" name="inbox">
+      <el-tab-pane label="情报报告" name="reports">
         <section class="workbench-grid">
           <aside class="surface inbox-panel">
             <div class="panel-toolbar">
@@ -460,8 +757,18 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
             </div>
 
             <el-empty v-if="!hasReports" description="还没有情报报告">
-              <el-button type="primary" @click="activeView = 'competitors'">
-                添加竞品
+              <template #description>
+                <span>首次采集会建立结构化快照基线；后续字段级变化才会进入情报箱。</span>
+              </template>
+              <div v-if="latestTask" class="baseline-summary">
+                <el-tag :type="taskStatusType(latestTask.status)" effect="light">
+                  {{ taskStatusLabel(latestTask.status) }}
+                </el-tag>
+                <span>{{ latestTask.targetTitle }}</span>
+                <span>{{ latestTask.adapter }}</span>
+              </div>
+              <el-button type="primary" @click="activeView = 'entities'">
+                去竞品与目标
               </el-button>
             </el-empty>
 
@@ -587,46 +894,67 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
                 </el-button>
               </footer>
             </template>
+            <template v-else-if="latestTask">
+              <div class="detail-title">
+                <div>
+                  <span class="eyebrow">Baseline Snapshot</span>
+                  <h2>已完成首次监控基线</h2>
+                </div>
+                <el-tag :type="taskStatusType(latestTask.status)" size="large">
+                  {{ taskStatusLabel(latestTask.status) }}
+                </el-tag>
+              </div>
+
+              <el-descriptions :column="2" border class="report-descriptions baseline-descriptions">
+                <el-descriptions-item label="监控目标">
+                  {{ latestTask.targetTitle }}
+                </el-descriptions-item>
+                <el-descriptions-item label="采集器">
+                  {{ latestTask.adapter }}
+                </el-descriptions-item>
+                <el-descriptions-item label="完成时间">
+                  {{ formatTime(latestTask.finishedAt || latestTask.startedAt) }}
+                </el-descriptions-item>
+                <el-descriptions-item label="目标 URL">
+                  <el-link v-if="latestTaskTarget?.url" :href="latestTaskTarget.url" target="_blank" :icon="Link">
+                    {{ latestTaskTarget.url }}
+                  </el-link>
+                  <span v-else>-</span>
+                </el-descriptions-item>
+              </el-descriptions>
+
+              <section class="baseline-result">
+                <h3>本次产出</h3>
+                <p>{{ latestTask.message }}</p>
+                <el-alert
+                  show-icon
+                  type="info"
+                  :closable="false"
+                  title="基线不是情报报告"
+                  description="第一次监控会保存页面结构化快照；当后续采集检测到定价、功能、活动或定位字段变化时，才会生成情报报告并进入收件箱。"
+                />
+              </section>
+            </template>
             <el-empty v-else description="选择一条情报查看详情" />
           </article>
         </section>
       </el-tab-pane>
 
-      <el-tab-pane label="竞品管理" name="competitors">
-        <section class="management-layout">
-          <el-card shadow="never" class="form-card">
-            <template #header>
-              <div class="card-header">
-                <span>添加竞品</span>
-                <el-tag type="info" effect="plain">
-                  URL + RSS
-                </el-tag>
-              </div>
-            </template>
-            <el-form label-position="top" @submit.prevent="handleCreateCompetitor">
-              <el-form-item label="竞品名称">
-                <el-input v-model="competitorForm.name" placeholder="例如 Comet" />
-              </el-form-item>
-              <el-form-item label="官网 URL">
-                <el-input v-model="competitorForm.homepage" placeholder="https://example.com" />
-              </el-form-item>
-              <el-form-item label="定位备注">
-                <el-input v-model="competitorForm.positioning" placeholder="产品定位、目标客群或你关注它的原因" />
-              </el-form-item>
-              <el-button type="primary" native-type="submit" :icon="Plus">
-                保存竞品
-              </el-button>
-            </el-form>
-          </el-card>
-
-          <el-card shadow="never" class="table-card">
+      <el-tab-pane label="竞品与目标" name="entities">
+        <section class="entities-layout">
+          <el-card shadow="never" class="table-card competitor-card">
             <template #header>
               <div class="card-header">
                 <span>竞品列表</span>
-                <span>{{ competitors.length }} 个</span>
+                <div class="card-actions">
+                  <span>{{ competitors.length }} 个</span>
+                  <el-button size="small" type="primary" :icon="Plus" @click="openCompetitorDialog">
+                    添加竞品
+                  </el-button>
+                </div>
               </div>
             </template>
-            <el-table :data="competitors" height="420" empty-text="还没有竞品">
+            <el-table class="competitor-table" :data="competitors" height="520" empty-text="还没有竞品">
               <el-table-column prop="name" label="竞品" min-width="150" />
               <el-table-column label="官网" min-width="240">
                 <template #default="{ row }">
@@ -646,85 +974,73 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
                   <el-badge :value="row.unreadReportCount" :hidden="row.unreadReportCount === 0" />
                 </template>
               </el-table-column>
+              <el-table-column label="操作" width="280" fixed="right">
+                <template #default="{ row }">
+                  <div class="row-actions">
+                    <el-button size="small" type="primary" plain :icon="Search" @click="openCompetitorDetail(row)">
+                      查看详情
+                    </el-button>
+                    <el-tooltip
+                      content="暂无已监控目标"
+                      :disabled="activeTargetsForCompetitor(row.id).length > 0"
+                      placement="top"
+                    >
+                      <span class="tooltip-button-wrap">
+                        <el-button
+                          size="small"
+                          :icon="Refresh"
+                          :disabled="activeTargetsForCompetitor(row.id).length === 0"
+                          :loading="isCollectingCompetitor(row.id)"
+                          @click="handleCollectCompetitorTargets(row)"
+                        >
+                          一键采集
+                        </el-button>
+                      </span>
+                    </el-tooltip>
+                    <el-button
+                      size="small"
+                      text
+                      type="danger"
+                      :icon="Delete"
+                      :loading="deletingCompetitorId === row.id"
+                      @click="handleDeleteCompetitor(row)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </section>
       </el-tab-pane>
 
-      <el-tab-pane label="监控目标" name="targets">
-        <section class="targets-layout">
-          <el-card shadow="never" class="draft-card">
-            <template #header>
-              <div class="card-header">
-                <span>目标草稿</span>
-                <el-button size="small" type="primary" :icon="Aim" @click="handleRecommendTargets">
-                  从官网生成
-                </el-button>
-              </div>
-            </template>
-            <el-empty v-if="drafts.length === 0" description="暂无草稿" />
-            <div v-else class="draft-list">
-              <div v-for="draft in drafts" :key="draft.type" class="draft-row">
-                <el-tag effect="plain">
-                  {{ targetTypeLabels[draft.type] }}
-                </el-tag>
-                <el-input v-model="draft.url" />
-                <el-progress :percentage="Math.round(draft.confidence * 100)" :stroke-width="8" />
-              </div>
-              <el-button type="primary" @click="handleConfirmDrafts">
-                确认草稿
-              </el-button>
-            </div>
-          </el-card>
-
+      <el-tab-pane label="任务记录" name="tasks">
+        <section class="tasks-layout">
           <el-card shadow="never" class="table-card">
             <template #header>
               <div class="card-header">
-                <span>活跃监控</span>
-                <span>{{ targets.length }} 个目标</span>
+                <span>采集任务</span>
+                <div class="card-actions">
+                  <el-select
+                    v-model="taskCompetitorFilter"
+                    class="task-filter-select"
+                    size="small"
+                    @change="handleTaskCompetitorChange"
+                  >
+                    <el-option label="全部竞品" value="all" />
+                    <el-option
+                      v-for="competitor in competitors"
+                      :key="competitor.id"
+                      :label="competitor.name"
+                      :value="competitor.id"
+                    />
+                  </el-select>
+                  <span>{{ tasks.length }} 条</span>
+                </div>
               </div>
             </template>
-            <el-table :data="targets" height="360" empty-text="还没有监控目标">
-              <el-table-column prop="title" label="目标" min-width="180" />
-              <el-table-column label="类型" width="100">
-                <template #default="{ row }">
-                  <el-tag effect="plain">
-                    {{ targetTypeLabel(row.type) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="URL" min-width="260">
-                <template #default="{ row }">
-                  <el-link :href="row.url" target="_blank" :icon="Link">
-                    {{ row.url }}
-                  </el-link>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="100">
-                <template #default="{ row }">
-                  <el-tag :type="row.status === 'active' ? 'success' : 'info'" effect="light">
-                    {{ row.status }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="100" fixed="right">
-                <template #default="{ row }">
-                  <el-button size="small" @click="handleCollect(row)">
-                    采集
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-
-          <el-card shadow="never" class="table-card">
-            <template #header>
-              <div class="card-header">
-                <span>任务运行</span>
-                <span>{{ tasks.length }} 条</span>
-              </div>
-            </template>
-            <el-table :data="tasks" height="260" empty-text="暂无采集任务">
+            <el-table v-loading="taskLoading" :data="tasks" height="260" empty-text="暂无采集任务">
               <el-table-column prop="targetTitle" label="目标" min-width="180" />
               <el-table-column label="状态" width="100">
                 <template #default="{ row }">
@@ -745,6 +1061,262 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
         </section>
       </el-tab-pane>
     </el-tabs>
+
+    <el-drawer
+      v-model="competitorDetailDrawerVisible"
+      class="competitor-detail-drawer"
+      direction="rtl"
+      size="720px"
+      :with-header="false"
+    >
+      <section v-loading="competitorDetailLoading" class="drawer-workspace">
+        <template v-if="detailCompetitor">
+          <header class="drawer-header">
+            <div>
+              <span class="eyebrow">Competitor Detail</span>
+              <h2>{{ detailCompetitor.name }}</h2>
+              <el-link :href="detailCompetitor.homepage" target="_blank" :icon="Link">
+                {{ detailCompetitor.homepage }}
+              </el-link>
+            </div>
+            <div class="drawer-actions">
+              <el-button :icon="Refresh" @click="loadCompetitorDetail">
+                刷新
+              </el-button>
+              <el-button :icon="Close" aria-label="关闭详情" @click="competitorDetailDrawerVisible = false" />
+            </div>
+          </header>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>基本信息</h3>
+            </div>
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="定位">
+                {{ detailCompetitor.positioning || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="更新时间">
+                {{ formatTime(detailCompetitor.updatedAt) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="目标数">
+                {{ detailTargets.length }}
+              </el-descriptions-item>
+              <el-descriptions-item label="未读情报">
+                {{ detailUnreadCount }}
+              </el-descriptions-item>
+            </el-descriptions>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <div>
+                <h3>首次基线状态</h3>
+                <p>第一次采集只建立快照基线；后续字段级变化才进入情报报告。</p>
+              </div>
+              <el-tag :type="detailHasBaseline ? 'success' : 'warning'" effect="light">
+                {{ detailHasBaseline ? '已建立' : '未建立' }}
+              </el-tag>
+            </div>
+            <div v-if="detailLatestTask" class="baseline-summary drawer-baseline-summary">
+              <el-tag :type="taskStatusType(detailLatestTask.status)" effect="light">
+                {{ taskStatusLabel(detailLatestTask.status) }}
+              </el-tag>
+              <span>{{ detailLatestTask.targetTitle }}</span>
+              <span>{{ detailLatestTask.message }}</span>
+            </div>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <div>
+                <h3>待确认监控页</h3>
+                <p>候选页保存时会验活，失败不会进入已监控目标。</p>
+              </div>
+              <div class="row-actions">
+                <el-button size="small" :icon="Aim" :loading="discoveryLoading" @click="handleDetailRecommendTargets">
+                  发现监控页
+                </el-button>
+                <el-button
+                  v-if="detailDrafts.length"
+                  size="small"
+                  type="primary"
+                  :disabled="detailSelectedDraftCount === 0"
+                  :loading="startMonitoringLoading"
+                  @click="handleDetailConfirmDrafts"
+                >
+                  保存已选
+                </el-button>
+              </div>
+            </div>
+            <el-empty v-if="detailDrafts.length === 0" description="暂无待确认监控页" />
+            <div v-else class="drawer-candidate-list">
+              <div v-for="draft in detailDrafts" :key="draftKey(draft)" class="drawer-candidate-row">
+                <el-checkbox v-model="draft.selected" />
+                <el-tag effect="plain">
+                  {{ targetTypeLabels[draft.type] }}
+                </el-tag>
+                <div class="candidate-main">
+                  <div class="candidate-meta">
+                    <strong>{{ draft.title }}</strong>
+                    <el-tag size="small" type="info" effect="plain">
+                      {{ sourceLabel(draft.source) }}
+                    </el-tag>
+                    <el-tag size="small" :type="validationType(draft.validationStatus)" effect="light">
+                      {{ validationLabel(draft.validationStatus) }}
+                    </el-tag>
+                  </div>
+                  <el-input v-model="draft.url" />
+                  <p>{{ draft.validationMessage }}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>已监控目标</h3>
+            </div>
+            <el-table :data="detailTargets" height="220" empty-text="还没有已监控目标">
+              <el-table-column prop="title" label="目标" min-width="150" show-overflow-tooltip />
+              <el-table-column label="类型" width="86">
+                <template #default="{ row }">
+                  <el-tag effect="plain">
+                    {{ targetTypeLabel(row.type) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="86">
+                <template #default="{ row }">
+                  <el-tag :type="row.status === 'active' ? 'success' : 'info'" effect="light">
+                    {{ row.status }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150">
+                <template #default="{ row }">
+                  <div class="row-actions">
+                    <el-button size="small" @click="handleDetailCollect(row)">
+                      采集
+                    </el-button>
+                    <el-button
+                      size="small"
+                      text
+                      type="danger"
+                      :icon="Delete"
+                      :loading="deletingTargetId === row.id"
+                      @click="handleDeleteTarget(row)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+
+          <section v-if="detailStartupRuns.length" class="drawer-section">
+            <div class="section-title-row">
+              <h3>首次采集进度</h3>
+            </div>
+            <div class="run-list">
+              <div v-for="run in detailStartupRuns" :key="run.target.id" class="run-row">
+                <el-tag :type="startupRunType(run.status)" effect="light">
+                  {{ startupRunLabel(run.status) }}
+                </el-tag>
+                <strong>{{ run.target.title }}</strong>
+                <span>{{ targetTypeLabels[run.target.type] }}</span>
+                <el-link :href="run.target.url" target="_blank" :icon="Link">
+                  {{ run.target.url }}
+                </el-link>
+                <p>{{ run.message }}</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>该竞品情报报告</h3>
+            </div>
+            <el-table :data="detailReports" height="220" empty-text="还没有该竞品情报">
+              <el-table-column prop="changeSummary" label="变化" min-width="220" show-overflow-tooltip />
+              <el-table-column label="优先级" width="86">
+                <template #default="{ row }">
+                  <el-tag :type="priorityType(row.priority)" effect="light">
+                    {{ priorityLabel(row.priority) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="证据" width="72">
+                <template #default="{ row }">
+                  {{ row.evidenceCount }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="90">
+                <template #default="{ row }">
+                  <el-button size="small" @click="openReport(row)">
+                    打开
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+
+          <section class="drawer-section">
+            <div class="section-title-row">
+              <h3>该竞品采集任务</h3>
+            </div>
+            <el-table :data="detailTasks" height="220" empty-text="暂无该竞品采集任务">
+              <el-table-column prop="targetTitle" label="目标" min-width="160" show-overflow-tooltip />
+              <el-table-column label="状态" width="86">
+                <template #default="{ row }">
+                  <el-tag :type="taskStatusType(row.status)" effect="light">
+                    {{ taskStatusLabel(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="adapter" label="采集器" width="120" />
+              <el-table-column prop="message" label="结果" min-width="180" show-overflow-tooltip />
+            </el-table>
+          </section>
+        </template>
+      </section>
+    </el-drawer>
+
+    <el-dialog
+      v-model="competitorDialogVisible"
+      align-center
+      class="competitor-dialog"
+      width="520px"
+      title="添加竞品"
+      @closed="resetCompetitorForm"
+    >
+      <el-form label-position="top" @submit.prevent="handleCreateCompetitor">
+        <el-form-item label="竞品名称" required>
+          <el-input v-model="competitorForm.name" placeholder="例如 Comet" />
+        </el-form-item>
+        <el-form-item label="官网 URL" required>
+          <el-input v-model="competitorForm.homepage" placeholder="https://example.com" />
+        </el-form-item>
+        <el-form-item label="定位备注">
+          <el-input
+            v-model="competitorForm.positioning"
+            :rows="3"
+            type="textarea"
+            placeholder="产品定位、目标客群或你关注它的原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="competitorDialogVisible = false">
+            取消
+          </el-button>
+          <el-button type="primary" :icon="Plus" @click="handleCreateCompetitor">
+            保存竞品
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
@@ -764,13 +1336,14 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   --ci-warning: #d97706;
   --ci-danger: #dc2626;
 
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: block;
   min-height: 100%;
   padding: 20px;
   color: var(--ci-text);
   background: var(--ci-canvas);
+  > * + * {
+    margin-top: 16px;
+  }
 }
 .surface {
   background: var(--ci-surface);
@@ -891,9 +1464,49 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   --metric-soft: #ecfdf5;
 }
 .workbench-tabs {
+  flex-shrink: 0;
   :deep(.el-tabs__header) {
     padding: 0 6px;
     margin: 0 0 12px;
+  }
+  :deep(.el-tabs__content) {
+    overflow: visible;
+  }
+}
+.run-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.candidate-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ci-text-muted);
+  }
+}
+.candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.run-row {
+  display: grid;
+  grid-template-columns: 96px 140px 76px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  p {
+    grid-column: 2 / -1;
+    margin: 0;
+    color: var(--ci-text-secondary);
   }
 }
 .workbench-grid {
@@ -915,6 +1528,29 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
 }
 .report-scroll {
   height: 560px;
+}
+.baseline-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  width: 100%;
+  max-width: 320px;
+  padding: 10px 12px;
+  margin: 12px auto;
+  color: var(--ci-text-secondary);
+  text-align: left;
+  background: #f8fbff;
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  span:last-child {
+    grid-column: 2;
+    overflow: hidden;
+    font-size: 12px;
+    color: var(--ci-text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 .report-row {
   position: relative;
@@ -1008,6 +1644,28 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
 .report-descriptions {
   margin-top: 16px;
 }
+.baseline-descriptions {
+  :deep(.el-descriptions__content) {
+    word-break: break-word;
+  }
+}
+.baseline-result {
+  padding: 14px;
+  margin-top: 14px;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    color: var(--ci-text);
+  }
+  p {
+    margin: 0 0 12px;
+    line-height: 1.65;
+    color: var(--ci-text-secondary);
+  }
+}
 .detail-tabs {
   margin-top: 14px;
 }
@@ -1100,11 +1758,28 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   border-top: 1px solid var(--ci-border-soft);
 }
 .management-layout,
-.targets-layout {
+.targets-layout,
+.entities-layout {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+}
+.management-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.entities-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.tasks-layout {
+  display: grid;
+  gap: 14px;
+}
+.competitor-card {
+  min-width: 0;
+}
+.task-filter-select {
+  width: 180px;
 }
 .table-card:last-child {
   grid-column: 1 / -1;
@@ -1114,9 +1789,29 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   justify-content: space-between;
   font-weight: 700;
 }
+.card-actions,
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.card-actions {
+  color: var(--ci-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.row-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.tooltip-button-wrap {
+  display: inline-flex;
+}
 .form-card,
-.table-card,
-.draft-card {
+.table-card {
   border: 1px solid var(--ci-border);
   border-radius: 8px;
   :deep(.el-card__header) {
@@ -1128,21 +1823,78 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
     padding: 14px;
   }
 }
-.draft-list {
+.drawer-workspace {
   display: grid;
-  gap: 12px;
+  gap: 14px;
+  min-height: 100%;
+  color: var(--ci-text);
 }
-.draft-row {
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 12px;
+.drawer-header,
+.section-title-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.drawer-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--ci-border-soft);
+  h2 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 30px;
+    letter-spacing: 0;
+  }
+}
+.drawer-section {
+  padding: 14px;
   background: var(--ci-surface);
   border: 1px solid var(--ci-border-soft);
   border-radius: 8px;
-  .el-progress {
-    grid-column: 1 / -1;
+}
+.section-title-row {
+  margin-bottom: 12px;
+  h3 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 24px;
+    letter-spacing: 0;
+  }
+  p {
+    margin: 4px 0 0;
+    line-height: 20px;
+    color: var(--ci-text-secondary);
+  }
+}
+.drawer-baseline-summary {
+  max-width: none;
+  margin: 0;
+}
+.drawer-candidate-list {
+  display: grid;
+  gap: 10px;
+}
+.drawer-candidate-row {
+  display: grid;
+  grid-template-columns: 28px 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  background: var(--ci-surface-raised);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+}
+:deep(.competitor-dialog) {
+  .el-dialog__header {
+    padding-bottom: 12px;
+    margin-right: 0;
+    border-bottom: 1px solid var(--ci-border-soft);
+  }
+  .el-dialog__body {
+    padding: 18px 20px 4px;
+  }
+  .el-dialog__footer {
+    padding: 14px 20px 18px;
   }
 }
 
@@ -1150,6 +1902,7 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   .workbench-grid,
   .management-layout,
   .targets-layout,
+  .entities-layout,
   .analysis-grid {
     grid-template-columns: 1fr;
   }
@@ -1168,6 +1921,12 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
   .report-scroll {
     height: 420px;
   }
+  .run-row {
+    grid-template-columns: 1fr;
+  }
+  .run-row p {
+    grid-column: auto;
+  }
 }
 
 @media (width <= 640px) {
@@ -1180,8 +1939,14 @@ function mockReportDetail(report: ReportSummaryVo): ReportDetailVo {
     grid-template-columns: 1fr;
   }
   .header-actions,
-  .detail-actions {
+  .detail-actions,
+  .drawer-header,
+  .section-title-row {
+    flex-direction: column;
     justify-content: flex-start;
+  }
+  .drawer-candidate-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

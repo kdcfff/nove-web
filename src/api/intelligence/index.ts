@@ -9,9 +9,11 @@ import type {
   ReportSummaryVo,
   TaskRunVo,
 } from './types';
-import { get, post, put } from '@/utils/request';
+import { del, get, post, put } from '@/utils/request';
 
 interface ApiEnvelope<T> {
+  code?: number;
+  msg?: string;
   data?: T;
   rows?: T;
 }
@@ -20,6 +22,9 @@ async function unwrap<T>(request: Promise<T | ApiEnvelope<T>>): Promise<T> {
   const response = await request;
   if (response && typeof response === 'object') {
     const envelope = response as ApiEnvelope<T>;
+    if (typeof envelope.code === 'number' && envelope.code !== 200) {
+      throw new Error(envelope.msg || '请求失败');
+    }
     if ('data' in envelope)
       return envelope.data as T;
     if ('rows' in envelope)
@@ -44,8 +49,12 @@ export function createCompetitor(data: CompetitorRequest) {
   return unwrap<CompetitorVo>(post<CompetitorVo>('/intelligence/competitors', data).json());
 }
 
+export function deleteCompetitor(id: number) {
+  return unwrap<void>(del<void>(`/intelligence/competitors/${id}`).json());
+}
+
 export function listMonitorTargets(competitorId?: number) {
-  return unwrap<MonitorTargetVo[]>(get<MonitorTargetVo[]>('/intelligence/targets', competitorId ? { competitorId } : undefined).json());
+  return unwrap<MonitorTargetVo[]>(get<MonitorTargetVo[]>('/intelligence/targets', competitorId != null ? { competitorId } : undefined).json());
 }
 
 export function recommendMonitorTargets(data: { competitorId: number; homepage: string }) {
@@ -56,12 +65,16 @@ export function createMonitorTarget(data: MonitorTargetRequest) {
   return unwrap<MonitorTargetVo>(post<MonitorTargetVo>('/intelligence/targets', data).json());
 }
 
+export function deleteMonitorTarget(id: number) {
+  return unwrap<void>(del<void>(`/intelligence/targets/${id}`).json());
+}
+
 export function triggerTargetCollect(id: number) {
   return unwrap<TaskRunVo>(post<TaskRunVo>(`/intelligence/targets/${id}/collect`).json());
 }
 
-export function listInboxReports() {
-  return unwrap<ReportSummaryVo[]>(get<ReportSummaryVo[]>('/intelligence/reports/inbox').json());
+export function listInboxReports(competitorId?: number) {
+  return unwrap<ReportSummaryVo[]>(get<ReportSummaryVo[]>('/intelligence/reports/inbox', competitorId != null ? { competitorId } : undefined).json());
 }
 
 export function getReportDetail(id: number) {
@@ -80,6 +93,6 @@ export function writeReportToKnowledge(id: number) {
   return unwrap<ReportDetailVo>(post<ReportDetailVo>(`/intelligence/reports/${id}/knowledge`).json());
 }
 
-export function listTaskRuns() {
-  return unwrap<TaskRunVo[]>(get<TaskRunVo[]>('/intelligence/tasks').json());
+export function listTaskRuns(competitorId?: number) {
+  return unwrap<TaskRunVo[]>(get<TaskRunVo[]>('/intelligence/tasks', competitorId != null ? { competitorId } : undefined).json());
 }
