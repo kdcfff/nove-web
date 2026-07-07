@@ -25,7 +25,7 @@ provide('refresh', refreshMainPage);
 
 <template>
   <el-main
-    class="layout-main"
+    class="layout-page-main"
     :class="{ 'layout-main-overfow-hidden': useroute.meta.isDefaultChat }"
   >
     <router-view v-slot="{ Component, route }">
@@ -39,6 +39,13 @@ provide('refresh', refreshMainPage);
 </template>
 
 <style scoped lang="scss">
+.layout-page-main {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
 .layout-main-overfow-hidden {
   overflow: hidden;
 }

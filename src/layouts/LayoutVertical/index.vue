@@ -52,10 +52,15 @@ useWindowWidthObserver();
   }
   .layout-main {
     height: 100%;
+    min-height: 0;
     padding: 0;
+    overflow: hidden;
   }
   .layout-container-main {
+    flex: 1 1 auto;
+    min-height: 0;
     margin-left: var(--sidebar-left-container-default-width, 0);
+    overflow: hidden;
     transition: margin-left 0.3s ease;
   }
 }

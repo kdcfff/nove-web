@@ -1177,7 +1177,13 @@ function errorMessage(error: unknown, fallback: string) {
               <h3>已监控目标</h3>
             </div>
             <el-table :data="detailTargets" height="220" empty-text="还没有已监控目标">
-              <el-table-column prop="title" label="目标" min-width="150" show-overflow-tooltip />
+              <el-table-column label="目标" min-width="150" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <el-link :href="row.url" target="_blank" :icon="Link" type="primary">
+                    {{ row.title }}
+                  </el-link>
+                </template>
+              </el-table-column>
               <el-table-column label="类型" width="86">
                 <template #default="{ row }">
                   <el-tag effect="plain">
