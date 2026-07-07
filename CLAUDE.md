@@ -109,3 +109,30 @@ Before changing competitive intelligence frontend behavior, read the product req
 - `/Users/kongdecheng/workspace/nova/nova-backend/docs/openapi/capture-webpage-nova-rendered.openapi.yaml`
 
 Frontend intelligence views should expose evidence and old/new change details before AI interpretation, so users can see why a report matters.
+
+## Competitive Intelligence Verification
+
+When validating competitive-intelligence frontend changes:
+
+```bash
+pnpm build
+```
+
+Existing warnings about KaTeX fonts, deprecated `:deep` combinator usage, or large chunks are warnings unless the build exits non-zero.
+
+Only run browser smoke against a frontend process whose cwd is this branch or worktree:
+
+```bash
+lsof -iTCP:5173 -sTCP:LISTEN -n -P
+lsof -iTCP:5174 -sTCP:LISTEN -n -P
+lsof -a -p <pid> -d cwd -Fn
+```
+
+For competitive intelligence UI smoke, verify:
+
+- Open the intelligence workbench.
+- Open a competitor with `查看详情`.
+- In the detail Drawer, confirm `已监控目标` shows target URL, schedule state, next run time, last scheduled time/result, and actions.
+- Open `定时`, save off/daily/weekly/cron as relevant, and confirm the target row refreshes.
+- Trigger target collection or competitor `一键采集`, then confirm `采集历史` shows trigger source, status, start/finish time, compare action, and report action when `reportId` exists.
+- Confirm global `任务记录` still works as a cross-competitor troubleshooting view and shows trigger source.
