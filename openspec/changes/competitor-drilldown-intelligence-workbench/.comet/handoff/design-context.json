@@ -1,0 +1,14 @@
+{
+  "change": "competitor-drilldown-intelligence-workbench",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "db6dd72323c98dd930383d4270bda6a27d7f6fb06c7ec2467b9e00cdc0f39101",
+  "files": [
+    { "path": "openspec/changes/competitor-drilldown-intelligence-workbench/proposal.md", "sha256": "152dd46e8642683a651a08076e7d3ff1a853264f5a519b51f0aa05aa5f94cf06" },
+    { "path": "openspec/changes/competitor-drilldown-intelligence-workbench/design.md", "sha256": "ca39c375bbf953901c41375e05ee39fac1c63a8ca388a296dc2a0e48da02b8f7" },
+    { "path": "openspec/changes/competitor-drilldown-intelligence-workbench/tasks.md", "sha256": "612c1682cda89d54cf416420a6c53be7625f5412f431498c44c49a5f257f30fa" },
+    { "path": "openspec/changes/competitor-drilldown-intelligence-workbench/specs/competitor-drilldown-intelligence-workbench/spec.md", "sha256": "4cfb772bf385255527475e88085b4deee96b2fedab0272c503ff8de9ee4900a6" }
+  ]
+}
