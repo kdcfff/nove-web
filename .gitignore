@@ -28,3 +28,6 @@ dist-ssr
 .claude
 .codegraph/
 .vercel
+
+# Local isolated worktrees
+.worktrees/

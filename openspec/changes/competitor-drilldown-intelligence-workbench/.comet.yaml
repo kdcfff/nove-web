@@ -1,12 +1,12 @@
 workflow: full
 phase: build
 context_compression: off
-build_mode: null
-build_pause: plan-ready
+build_mode: executing-plans
+build_pause: null
 subagent_dispatch: null
-tdd_mode: null
-review_mode: null
-isolation: null
+tdd_mode: direct
+review_mode: standard
+isolation: worktree
 verify_mode: null
 auto_transition: true
 base_ref: e31a8015553d76237726904695ca303c2ad63b6d
