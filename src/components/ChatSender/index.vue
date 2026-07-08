@@ -51,7 +51,6 @@ const agentToolMode = ref<AgentToolMode>('auto');
 const selectedAgentTools = ref<string[]>([]);
 const directTableName = ref('');
 const directSql = ref('');
-const directTenantId = ref('000000');
 const directQuery = ref('');
 const directFrom = ref('');
 const directTo = ref('');
@@ -190,9 +189,6 @@ const directToolReady = computed(() => {
     return Boolean(directSql.value.trim());
   }
   if (isCompetitiveToolSelected.value) {
-    if (!directTenantId.value.trim()) {
-      return false;
-    }
     if (selectedAgentTool.value === 'build_competitive_insight_brief') {
       return Boolean(directQuery.value.trim());
     }
@@ -223,9 +219,7 @@ const toolArgs = computed(() => {
     return { sql: directSql.value.trim() };
   }
   if (isCompetitiveToolSelected.value) {
-    const args: Record<string, string> = {
-      tenantId: directTenantId.value.trim(),
-    };
+    const args: Record<string, string> = {};
     if (selectedAgentTool.value === 'build_competitive_insight_brief') {
       args.query = directQuery.value.trim();
     }
@@ -583,11 +577,6 @@ defineExpose({
                     placeholder="SELECT * FROM chat_message LIMIT 5"
                   />
                   <template v-if="isCompetitiveToolSelected">
-                    <el-input
-                      v-model="directTenantId"
-                      placeholder="租户 ID"
-                      clearable
-                    />
                     <el-input
                       v-if="selectedAgentTool === 'build_competitive_insight_brief'"
                       v-model="directQuery"
