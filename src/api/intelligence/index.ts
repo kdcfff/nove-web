@@ -4,9 +4,11 @@ import type {
   CompetitorVo,
   FeedbackValue,
   MonitorTargetRequest,
+  MonitorTargetScheduleRequest,
   MonitorTargetVo,
   ReportDetailVo,
   ReportSummaryVo,
+  TaskCompareVo,
   TaskRunVo,
 } from './types';
 import { del, get, post, put } from '@/utils/request';
@@ -69,8 +71,13 @@ export function deleteMonitorTarget(id: number) {
   return unwrap<void>(del<void>(`/intelligence/targets/${id}`).json());
 }
 
-export function triggerTargetCollect(id: number) {
-  return unwrap<TaskRunVo>(post<TaskRunVo>(`/intelligence/targets/${id}/collect`).json());
+export function updateMonitorTargetSchedule(id: number, data: MonitorTargetScheduleRequest) {
+  return unwrap<MonitorTargetVo>(put<MonitorTargetVo>(`/intelligence/targets/${id}/schedule`, data).json());
+}
+
+export function triggerTargetCollect(id: number, triggerSource?: 'manual' | 'competitor_manual') {
+  const query = triggerSource ? `?triggerSource=${triggerSource}` : '';
+  return unwrap<TaskRunVo>(post<TaskRunVo>(`/intelligence/targets/${id}/collect${query}`).json());
 }
 
 export function listInboxReports(competitorId?: number) {
@@ -95,4 +102,8 @@ export function writeReportToKnowledge(id: number) {
 
 export function listTaskRuns(competitorId?: number) {
   return unwrap<TaskRunVo[]>(get<TaskRunVo[]>('/intelligence/tasks', competitorId != null ? { competitorId } : undefined).json());
+}
+
+export function getTaskCompare(id: number) {
+  return unwrap<TaskCompareVo>(get<TaskCompareVo>(`/intelligence/tasks/${id}/compare`).json());
 }

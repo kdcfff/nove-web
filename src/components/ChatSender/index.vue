@@ -51,6 +51,9 @@ const agentToolMode = ref<AgentToolMode>('auto');
 const selectedAgentTools = ref<string[]>([]);
 const directTableName = ref('');
 const directSql = ref('');
+const directQuery = ref('');
+const directFrom = ref('');
+const directTo = ref('');
 const toolPopoverRef = ref();
 
 const agentToolOptions: AgentToolOption[] = [
@@ -68,6 +71,31 @@ const agentToolOptions: AgentToolOption[] = [
     name: 'execute_readonly_sql',
     label: '只读 SQL',
     description: '执行 SELECT、SHOW、DESC、EXPLAIN 等只读语句',
+  },
+  {
+    name: 'list_competitive_intelligence_sources',
+    label: '竞品数据源',
+    description: '列出竞品情报可分析的数据表、字段和限制',
+  },
+  {
+    name: 'query_competitor_metrics',
+    label: '竞品指标',
+    description: '查询竞品、目标、报告、反馈和采集成功率',
+  },
+  {
+    name: 'search_competitive_evidence',
+    label: '竞品证据',
+    description: '检索报告、目标 URL、变更字段和采集时间证据',
+  },
+  {
+    name: 'analyze_collection_health',
+    label: '采集健康',
+    description: '分析任务状态、失败原因和受影响竞品',
+  },
+  {
+    name: 'build_competitive_insight_brief',
+    label: '竞品简报',
+    description: '生成包含结论、证据、影响、建议和限制的分析简报',
   },
 ];
 
@@ -117,6 +145,12 @@ const selectedAgentTool = computed({
 
 const isToolRunMode = computed(() => agentToolMode.value === 'direct');
 
+const isCompetitiveToolSelected = computed(() => selectedAgentTool.value.startsWith('list_competitive_')
+  || selectedAgentTool.value.startsWith('query_competitor_')
+  || selectedAgentTool.value.startsWith('search_competitive_')
+  || selectedAgentTool.value.startsWith('analyze_collection_')
+  || selectedAgentTool.value.startsWith('build_competitive_'));
+
 const selectedToolLabel = computed(() => {
   if (agentToolMode.value === 'auto') {
     return '工具自动';
@@ -154,6 +188,11 @@ const directToolReady = computed(() => {
   if (selectedAgentTool.value === 'execute_readonly_sql') {
     return Boolean(directSql.value.trim());
   }
+  if (isCompetitiveToolSelected.value) {
+    if (selectedAgentTool.value === 'build_competitive_insight_brief') {
+      return Boolean(directQuery.value.trim());
+    }
+  }
   return true;
 });
 
@@ -178,6 +217,19 @@ const toolArgs = computed(() => {
   }
   if (selectedAgentTool.value === 'execute_readonly_sql') {
     return { sql: directSql.value.trim() };
+  }
+  if (isCompetitiveToolSelected.value) {
+    const args: Record<string, string> = {};
+    if (selectedAgentTool.value === 'build_competitive_insight_brief') {
+      args.query = directQuery.value.trim();
+    }
+    if (directFrom.value.trim()) {
+      args.from = directFrom.value.trim();
+    }
+    if (directTo.value.trim()) {
+      args.to = directTo.value.trim();
+    }
+    return args;
   }
   return {};
 });
@@ -524,6 +576,27 @@ defineExpose({
                     :rows="3"
                     placeholder="SELECT * FROM chat_message LIMIT 5"
                   />
+                  <template v-if="isCompetitiveToolSelected">
+                    <el-input
+                      v-if="selectedAgentTool === 'build_competitive_insight_brief'"
+                      v-model="directQuery"
+                      type="textarea"
+                      :rows="2"
+                      placeholder="例如：最近竞品有什么值得老板关注的动作？"
+                    />
+                    <div class="direct-time-range">
+                      <el-input
+                        v-model="directFrom"
+                        placeholder="开始时间，可选"
+                        clearable
+                      />
+                      <el-input
+                        v-model="directTo"
+                        placeholder="结束时间，可选"
+                        clearable
+                      />
+                    </div>
+                  </template>
                   <div v-if="!directToolReady" class="tool-required-tip">
                     运行工具前需要补齐工具参数。
                   </div>
@@ -803,6 +876,12 @@ defineExpose({
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .direct-time-range {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
   }
 
   .direct-tool-title {

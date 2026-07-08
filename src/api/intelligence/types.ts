@@ -32,15 +32,39 @@ export interface MonitorTargetVo {
   status: 'active' | 'draft' | 'paused';
   confidence: number;
   lastCollectedAt?: string;
+  source?: MonitorTargetSource;
+  analysisNotes?: string;
+  scheduleEnabled?: boolean;
+  scheduleMode?: ScheduleMode;
+  scheduleTime?: string;
+  scheduleWeekday?: number;
+  scheduleCron?: string;
+  nextCollectAt?: string;
+  lastScheduledAt?: string;
+  lastScheduledStatus?: string;
+  lastScheduledMessage?: string;
 }
 
 export type MonitorTargetType = 'official_site' | 'pricing' | 'docs' | 'blog' | 'changelog' | 'rss';
+export type MonitorTargetSource = 'homepage_link' | 'html_link' | 'feed_hint' | 'rule_fallback' | 'manual';
+export type ScheduleMode = 'off' | 'daily' | 'weekly' | 'cron';
+export type TaskTriggerSource = 'manual' | 'competitor_manual' | 'scheduled';
 
 export interface MonitorTargetRequest {
   competitorId: number;
   type: MonitorTargetType;
   title: string;
   url: string;
+  source?: MonitorTargetSource;
+  analysisNotes?: string;
+}
+
+export interface MonitorTargetScheduleRequest {
+  scheduleEnabled: boolean;
+  scheduleMode: ScheduleMode;
+  scheduleTime?: string;
+  scheduleWeekday?: number;
+  scheduleCron?: string;
 }
 
 export interface ReportSummaryVo {
@@ -86,6 +110,87 @@ export interface TaskRunVo {
   status: 'queued' | 'running' | 'success' | 'failed';
   adapter: string;
   message: string;
+  triggerSource?: TaskTriggerSource;
+  reportId?: number;
   startedAt: string;
   finishedAt?: string;
+}
+
+export interface TaskCompareVo {
+  taskId: number;
+  targetId: number;
+  targetTitle: string;
+  url: string;
+  adapter: string;
+  status: 'success' | 'partial' | 'failed' | string;
+  statusCode?: number;
+  lineCount?: number;
+  contentHash?: string;
+  oldSnapshotId?: number;
+  newSnapshotId?: number;
+  changeCount: number;
+  reportIds: number[];
+  message: string;
+  compareSummary: string;
+  capture?: CaptureInspectVo;
+  oldSnapshot?: SnapshotInspectVo;
+  newSnapshot?: SnapshotInspectVo;
+  changes: ChangeInspectVo[];
+}
+
+export interface CaptureInspectVo {
+  id: number;
+  requestedUrl: string;
+  finalUrl: string;
+  adapter: string;
+  status: string;
+  statusCode?: number;
+  title?: string;
+  markdownLineCount?: number;
+  markdownCharCount?: number;
+  mainTextCharCount?: number;
+  durationMs?: number;
+  qualityScore?: number;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  contentHash?: string;
+  errorMessage?: string;
+  markdown?: string;
+}
+
+export interface SnapshotInspectVo {
+  id: number;
+  rawCaptureId: number;
+  title?: string;
+  description?: string;
+  canonicalUrl?: string;
+  hashes: Record<string, string>;
+  priceLikeText: string[];
+  featureLikeText: string[];
+  campaignLikeText: string[];
+  customerLikeText: string[];
+  contentBlocks: ContentBlockInspectVo[];
+}
+
+export interface ContentBlockInspectVo {
+  blockId: string;
+  kind: string;
+  text: string;
+  hash: string;
+}
+
+export interface ChangeInspectVo {
+  id?: number;
+  source: 'persisted' | 'computed' | string;
+  changeKind: string;
+  fieldPath: string;
+  oldValue: string;
+  newValue: string;
+  oldSnippet: string;
+  newSnippet: string;
+  sourceBlockId: string;
+  evidenceStrength: number;
+  noiseRisk: number;
+  reasonCodes: string[];
+  promotionStatus: string;
 }

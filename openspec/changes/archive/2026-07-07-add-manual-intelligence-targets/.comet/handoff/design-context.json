@@ -1,0 +1,14 @@
+{
+  "change": "add-manual-intelligence-targets",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "f9825e0660a797e3753adf59334b1900222f015ca59a86aa9345f4dc4bb86899",
+  "files": [
+    { "path": "openspec/changes/add-manual-intelligence-targets/proposal.md", "sha256": "1e35c0eb60e597f873f90cb030ac071e9b0ff47cb5eb4bdb738c1bb3d9656cb5" },
+    { "path": "openspec/changes/add-manual-intelligence-targets/design.md", "sha256": "7b5a1ba3a76233d32d49b1e5c951534b9e89a4d365d1eef8ad816626afff146f" },
+    { "path": "openspec/changes/add-manual-intelligence-targets/tasks.md", "sha256": "867628d733646bc9e95494d0f24cbc4681a56048258702b4fd207f98a95cc134" },
+    { "path": "openspec/changes/add-manual-intelligence-targets/specs/manual-intelligence-targets/spec.md", "sha256": "27dfd0875d2d99e4ed95c5899f6320eb5ccdc60e3e8190ad07ebbe6bd97576e8" }
+  ]
+}
