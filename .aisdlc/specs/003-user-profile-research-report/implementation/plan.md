@@ -220,7 +220,7 @@
 - 审计信息：
   - repo: `root`
     branch: `003-user-profile-research-report`
-    commit: `<执行后回填>`
+    commit: `7ec1db5`
     pr: `<执行后回填>`
     changed_files:
       - `src/api/intelligence/types.ts`
