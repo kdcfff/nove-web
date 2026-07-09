@@ -1,10 +1,13 @@
 import { Buffer } from 'node:buffer';
 import { Readable } from 'node:stream';
 
-const BACKEND_ORIGIN = 'http://101.37.32.56';
-const CONNECT_TIMEOUT_MS = 4000;
-const RETRY_DELAY_MS = 300;
-const MAX_ATTEMPTS = 2;
+const BACKEND_TARGETS = [
+  { origin: 'http://101.37.32.56', prefix: '/prod-api' },
+  { origin: 'http://101.37.32.56:6039', prefix: '' },
+];
+const CONNECT_TIMEOUT_MS = 10000;
+const RETRY_DELAY_MS = 500;
+const MAX_ATTEMPTS_PER_TARGET = 2;
 
 const hopByHopHeaders = new Set([
   'connection',
@@ -31,17 +34,20 @@ export const config = {
   maxDuration: 60,
 };
 
-function buildTargetUrl(req) {
+function buildTargetUrls(req) {
   const requestUrl = new URL(req.url || '/', `https://${req.headers.host || 'localhost'}`);
   const rawPath = requestUrl.searchParams.get('path') || '';
   requestUrl.searchParams.delete('path');
 
   const cleanPath = rawPath.replace(/^\/+/, '');
-  const targetUrl = new URL(cleanPath ? `/prod-api/${cleanPath}` : '/prod-api/', BACKEND_ORIGIN);
-  requestUrl.searchParams.forEach((value, key) => {
-    targetUrl.searchParams.append(key, value);
+  return BACKEND_TARGETS.map(({ origin, prefix }) => {
+    const path = [prefix, cleanPath].filter(Boolean).join('/');
+    const targetUrl = new URL(path ? `/${path}` : `${prefix || '/'}`, origin);
+    requestUrl.searchParams.forEach((value, key) => {
+      targetUrl.searchParams.append(key, value);
+    });
+    return targetUrl;
   });
-  return targetUrl;
 }
 
 function buildForwardHeaders(req) {
@@ -117,40 +123,42 @@ async function sendProxyResponse(proxyResponse, res) {
 }
 
 export default async function handler(req, res) {
-  const targetUrl = buildTargetUrl(req);
+  const targetUrls = buildTargetUrls(req);
   const headers = buildForwardHeaders(req);
   const body = await readRequestBody(req);
   let lastError;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const proxyResponse = await fetchWithHeaderTimeout(targetUrl, {
-        method: req.method,
-        headers,
-        body,
-        redirect: 'manual',
-      });
+  for (const targetUrl of targetUrls) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_TARGET; attempt += 1) {
+      try {
+        const proxyResponse = await fetchWithHeaderTimeout(targetUrl, {
+          method: req.method,
+          headers,
+          body,
+          redirect: 'manual',
+        });
 
-      if (attempt < MAX_ATTEMPTS && shouldRetry(proxyResponse)) {
-        await proxyResponse.arrayBuffer().catch(() => {});
-        await delay(RETRY_DELAY_MS);
-        continue;
+        if (attempt < MAX_ATTEMPTS_PER_TARGET && shouldRetry(proxyResponse)) {
+          await proxyResponse.arrayBuffer().catch(() => {});
+          await delay(RETRY_DELAY_MS);
+          continue;
+        }
+
+        await sendProxyResponse(proxyResponse, res);
+        return;
       }
-
-      await sendProxyResponse(proxyResponse, res);
-      return;
-    }
-    catch (error) {
-      lastError = error;
-      if (attempt < MAX_ATTEMPTS) {
-        await delay(RETRY_DELAY_MS);
-        continue;
+      catch (error) {
+        lastError = error;
+        if (attempt < MAX_ATTEMPTS_PER_TARGET) {
+          await delay(RETRY_DELAY_MS);
+          continue;
+        }
       }
     }
   }
 
   console.error('Nova API proxy failed', {
-    target: targetUrl.toString(),
+    targets: targetUrls.map(targetUrl => targetUrl.toString()),
     message: lastError?.message,
   });
   res.statusCode = 502;
