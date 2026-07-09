@@ -175,7 +175,7 @@
 - 审计信息：
   - repo: `root`
     branch: `003-user-profile-research-report`
-    commit: `<执行后回填>`
+    commit: `402c7b9`
     pr: `<执行后回填>`
     changed_files:
       - `.aisdlc/specs/003-user-profile-research-report/implementation/plan.md`
