@@ -270,7 +270,7 @@
 
 ### Task T4: 手动生成、历史列表与 Markdown 研报详情
 
-- [ ] **状态**：未开始
+- [x] **状态**：完成
 
 **代码仓范围：**
 - 根项目：`nova-web`
@@ -300,17 +300,17 @@
 **步骤 3：运行验证**
 - Run: `pnpm build`
 - Expected: PASS，页面模板与类型通过。
+- Result: PASS，执行 `pnpm build`，`vue-tsc -b && vite build` 通过；仅有既有 KaTeX 字体、`:deep` 和 chunk size warning。
 
 **步骤 4：提交（频繁提交；commit message 必须中文）**
 - Commit message: `实现画像研报生成和详情展示`
 - 审计信息：
   - repo: `root`
     branch: `003-user-profile-research-report`
-    commit: `<执行后回填>`
+    commit: `4cc3c7d`
     pr: `<执行后回填>`
     changed_files:
       - `src/pages/intelligence/index.vue`
-      - `src/styles/markdown.scss`
 
 ### Task T5: 前端构建与竞品情报 smoke 验证
 
