@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type {
+  CaptureAdapter,
+  ChangeInspectVo,
   CompetitorVo,
   FeedbackValue,
   MonitorTargetScheduleRequest,
@@ -50,6 +52,7 @@ const startMonitoringLoading = ref(false);
 const deletingCompetitorId = ref<number>();
 const deletingTargetId = ref<number>();
 const taskLoading = ref(false);
+const feedbackSubmitting = ref(false);
 const collectingCompetitorIds = ref<number[]>([]);
 const pageError = ref('');
 const activeView = ref<'reports' | 'entities' | 'tasks'>('entities');
@@ -77,6 +80,7 @@ const startupRuns = ref<Array<{
   message: string;
 }>>([]);
 const reportKeyword = ref('');
+const competitorKeyword = ref('');
 const reportPriority = ref<ReportSummaryVo['priority'] | 'all'>('all');
 const taskCompetitorFilter = ref<number | 'all'>('all');
 const competitorDialogVisible = ref(false);
@@ -94,6 +98,7 @@ const detailTasks = ref<TaskRunVo[]>([]);
 const selectedTaskCompare = ref<TaskCompareVo | null>(null);
 const editingManualDraft = ref<DraftTarget | null>(null);
 const scheduleTarget = ref<MonitorTargetVo | null>(null);
+const manualCaptureAdapters = reactive<Record<number, CaptureAdapter>>({});
 let detailLoadSeq = 0;
 
 const competitorForm = reactive({
@@ -115,6 +120,7 @@ const scheduleForm = reactive<MonitorTargetScheduleRequest>({
   scheduleTime: '09:00:00',
   scheduleWeekday: 1,
   scheduleCron: '0 0 9 * * *',
+  captureAdapter: 'auto',
 });
 
 const hasReports = computed(() => reports.value.length > 0);
@@ -141,6 +147,25 @@ const filteredReports = computed(() => reports.value.filter((report) => {
   const matchesPriority = reportPriority.value === 'all' || report.priority === reportPriority.value;
   return matchesKeyword && matchesPriority;
 }));
+const filteredCompetitors = computed(() => {
+  const keyword = competitorKeyword.value.trim().toLowerCase();
+  if (!keyword)
+    return competitors.value;
+  return competitors.value.filter((competitor) => {
+    const searchable = [
+      competitor.name,
+      competitor.homepage,
+      competitor.positioning,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return searchable.includes(keyword);
+  });
+});
+const competitorCountLabel = computed(() => {
+  if (!competitorKeyword.value.trim())
+    return `${competitors.value.length} 个`;
+  return `${filteredCompetitors.value.length} / ${competitors.value.length} 个`;
+});
+const competitorEmptyText = computed(() => competitorKeyword.value.trim() ? '没有匹配的竞品' : '还没有竞品');
 const statCards = computed(() => [
   { label: '未读情报', value: unreadCount.value, icon: WarningFilled, tone: 'danger' },
   { label: '高影响', value: highImpactCount.value, icon: TrendCharts, tone: 'warning' },
@@ -192,6 +217,12 @@ const scheduleModeLabels: Record<ScheduleMode, string> = {
   daily: '每天',
   weekly: '每周',
   cron: 'Cron',
+};
+
+const captureAdapterLabels: Record<CaptureAdapter, string> = {
+  auto: '自动',
+  nova_rendered: '本地渲染',
+  firecrawl: 'Firecrawl',
 };
 
 const weekdayLabels: Record<number, string> = {
@@ -269,6 +300,7 @@ function openScheduleDialog(target: MonitorTargetVo) {
     scheduleTime: normalizeScheduleTime(target.scheduleTime) || '09:00:00',
     scheduleWeekday: target.scheduleWeekday || 1,
     scheduleCron: target.scheduleCron || '0 0 9 * * *',
+    captureAdapter: captureAdapterValue(target.captureAdapter),
   });
   scheduleDialogVisible.value = true;
 }
@@ -290,6 +322,38 @@ function belongsToCompetitor(item: { competitorId?: number }, competitorId?: num
 
 function activeTargetsForCompetitor(competitorId: number, source: MonitorTargetVo[] = targets.value) {
   return source.filter(target => target.id && target.status === 'active' && belongsToCompetitor(target, competitorId));
+}
+
+function syncManualCaptureAdapters(targetList: MonitorTargetVo[]) {
+  const activeIds = new Set<number>();
+  for (const target of targetList) {
+    if (!target.id)
+      continue;
+    activeIds.add(target.id);
+    manualCaptureAdapters[target.id] = captureAdapterValue(target.captureAdapter);
+  }
+  Object.keys(manualCaptureAdapters).forEach((key) => {
+    const id = Number(key);
+    if (!activeIds.has(id))
+      delete manualCaptureAdapters[id];
+  });
+}
+
+function captureAdapterValue(adapter?: unknown): CaptureAdapter {
+  if (adapter === 'firecrawl')
+    return 'firecrawl';
+  if (adapter === 'nova_rendered' || adapter === 'nova_http')
+    return 'nova_rendered';
+  return 'auto';
+}
+
+function manualCaptureAdapter(target: MonitorTargetVo): CaptureAdapter {
+  return target.id ? (manualCaptureAdapters[target.id] || captureAdapterValue(target.captureAdapter)) : captureAdapterValue(target.captureAdapter);
+}
+
+function setManualCaptureAdapter(target: MonitorTargetVo, adapter: unknown) {
+  if (target.id)
+    manualCaptureAdapters[target.id] = captureAdapterValue(adapter);
 }
 
 function isCollectingCompetitor(competitorId: number) {
@@ -332,6 +396,7 @@ async function loadCompetitorDetail() {
     const scopedTargets = targetData.filter(target => belongsToCompetitor(target, competitorId));
     const scopedTargetIds = new Set(scopedTargets.map(target => normalizedId(target.id)));
     detailTargets.value = scopedTargets;
+    syncManualCaptureAdapters(scopedTargets);
     detailReports.value = reportData.filter(report => belongsToCompetitor(report, competitorId));
     detailTasks.value = taskData.filter(task => scopedTargetIds.has(normalizedId(task.targetId)));
   }
@@ -441,6 +506,16 @@ function handleSubmitManualTarget() {
   resetManualTargetForm();
 }
 
+function handleRemoveDraft(draft: DraftTarget) {
+  const removedKey = draftKey(draft);
+  drafts.value = drafts.value.filter(item => draftKey(item) !== removedKey);
+  if (editingManualDraft.value && draftKey(editingManualDraft.value) === removedKey) {
+    resetManualTargetForm();
+    manualTargetDialogVisible.value = false;
+  }
+  ElMessage.success('已从待确认列表移除');
+}
+
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -481,6 +556,10 @@ function taskStatusType(status: TaskRunVo['status']) {
 
 function scheduleModeLabel(mode?: string) {
   return scheduleModeLabels[(mode as ScheduleMode) || 'off'] || mode || '关闭';
+}
+
+function captureAdapterLabel(adapter?: string) {
+  return captureAdapterLabels[captureAdapterValue(adapter)];
 }
 
 function scheduleStateType(target: MonitorTargetVo): TagType {
@@ -558,6 +637,41 @@ function snapshotSignals(snapshot: TaskCompareVo['newSnapshot']) {
   ].filter(item => item.values.length > 0);
 }
 
+function ruleReasonCodes(change: ChangeInspectVo) {
+  return change.reasonCodes.filter(code => !code.startsWith('llm_'));
+}
+
+function aiReasonCodes(change: ChangeInspectVo) {
+  return change.reasonCodes.filter(code => code.startsWith('llm_'));
+}
+
+function aiReasonText(change: ChangeInspectVo) {
+  const reason = change.reasonCodes.find(code => code.startsWith('llm_reason:'));
+  return reason ? reason.replace('llm_reason:', '') : '';
+}
+
+function aiDecisionLabel(change: ChangeInspectVo) {
+  const codes = aiReasonCodes(change);
+  if (codes.includes('llm_veto'))
+    return 'AI 判定不重要';
+  if (codes.includes('llm_unavailable'))
+    return 'AI 不可用';
+  if (codes.length > 0)
+    return 'AI 已判断';
+  return change.source === 'persisted' ? '未见 AI 判定' : '未调用 AI';
+}
+
+function aiDecisionType(change: ChangeInspectVo): TagType {
+  const codes = aiReasonCodes(change);
+  if (codes.includes('llm_veto'))
+    return 'warning';
+  if (codes.includes('llm_unavailable'))
+    return 'danger';
+  if (codes.length > 0)
+    return 'primary';
+  return 'info';
+}
+
 async function openTaskCompare(task: TaskRunVo) {
   selectedTaskCompare.value = null;
   taskCompareDrawerVisible.value = true;
@@ -589,6 +703,7 @@ async function loadWorkbench() {
     ]);
     competitors.value = competitorData;
     targets.value = targetData;
+    syncManualCaptureAdapters(targetData);
     reports.value = reportData;
     tasks.value = taskData;
     if (reportData[0]) {
@@ -695,11 +810,11 @@ async function handleConfirmDrafts(competitorId?: number) {
   return saved;
 }
 
-async function handleCollect(target: MonitorTargetVo) {
+async function handleCollect(target: MonitorTargetVo, adapter = manualCaptureAdapter(target)) {
   if (!target.id)
     return;
   try {
-    const task = await triggerTargetCollect(target.id);
+    const task = await triggerTargetCollect(target.id, 'manual', adapter);
     await loadTaskRuns();
     reports.value = await listInboxReports();
     if (reports.value[0]) {
@@ -732,12 +847,14 @@ function schedulePayload(): MonitorTargetScheduleRequest {
     return {
       scheduleEnabled: false,
       scheduleMode: 'off',
+      captureAdapter: captureAdapterValue(scheduleForm.captureAdapter),
     };
   }
 
   const payload: MonitorTargetScheduleRequest = {
     scheduleEnabled: true,
     scheduleMode: scheduleForm.scheduleMode,
+    captureAdapter: captureAdapterValue(scheduleForm.captureAdapter),
   };
   if (scheduleForm.scheduleMode === 'daily' || scheduleForm.scheduleMode === 'weekly')
     payload.scheduleTime = normalizeScheduleTime(scheduleForm.scheduleTime);
@@ -769,6 +886,8 @@ function validateScheduleForm() {
 function syncUpdatedTarget(updated: MonitorTargetVo) {
   detailTargets.value = detailTargets.value.map(target => sameId(target.id, updated.id) ? updated : target);
   targets.value = targets.value.map(target => sameId(target.id, updated.id) ? updated : target);
+  if (updated.id)
+    manualCaptureAdapters[updated.id] = captureAdapterValue(updated.captureAdapter);
 }
 
 async function handleSaveSchedule() {
@@ -829,7 +948,7 @@ async function handleCollectCompetitorTargets(competitor: CompetitorVo) {
       if (!target.id)
         continue;
       try {
-        await triggerTargetCollect(target.id, 'competitor_manual');
+        await triggerTargetCollect(target.id, 'competitor_manual', captureAdapterValue(target.captureAdapter));
         successCount += 1;
       }
       catch {
@@ -962,13 +1081,27 @@ async function openReportById(reportId?: number) {
 }
 
 async function handleFeedback(value: FeedbackValue) {
-  if (!selectedReport.value)
+  if (!selectedReport.value || feedbackSubmitting.value)
     return;
+  feedbackSubmitting.value = true;
   try {
-    selectedReport.value = await submitReportFeedback(selectedReport.value.id, value);
+    const updated = await submitReportFeedback(selectedReport.value.id, value);
+    selectedReport.value = updated;
+    reports.value = reports.value.map(report =>
+      sameId(report.id, updated.id) ? { ...report, feedback: updated.feedback } : report,
+    );
+    if (competitorDetailDrawerVisible.value && detailReports.value.length > 0) {
+      detailReports.value = detailReports.value.map(report =>
+        sameId(report.id, updated.id) ? { ...report, feedback: updated.feedback } : report,
+      );
+    }
+    ElMessage.success(`已标记为${feedbackLabels[value]}`);
   }
   catch (error) {
     ElMessage.error(errorMessage(error, '反馈提交失败'));
+  }
+  finally {
+    feedbackSubmitting.value = false;
   }
 }
 
@@ -1151,10 +1284,13 @@ function errorMessage(error: unknown, fallback: string) {
                 <el-descriptions-item label="证据">
                   {{ selectedReport.evidenceCount }} 条
                 </el-descriptions-item>
+                <el-descriptions-item label="反馈">
+                  {{ selectedReport.feedback ? feedbackLabels[selectedReport.feedback] : '未反馈' }}
+                </el-descriptions-item>
                 <el-descriptions-item label="知识库">
                   {{ knowledgeStatusLabels[selectedReport.knowledgeWritebackStatus] }}
                 </el-descriptions-item>
-                <el-descriptions-item label="来源">
+                <el-descriptions-item label="来源" :span="4">
                   <el-link :href="selectedReport.sourceUrl" target="_blank" :icon="Link">
                     打开
                   </el-link>
@@ -1220,7 +1356,14 @@ function errorMessage(error: unknown, fallback: string) {
 
               <footer class="detail-actions">
                 <el-button-group>
-                  <el-button v-for="(label, value) in feedbackLabels" :key="value" @click="handleFeedback(value)">
+                  <el-button
+                    v-for="(label, value) in feedbackLabels"
+                    :key="value"
+                    :loading="feedbackSubmitting && selectedReport.feedback !== value"
+                    :disabled="feedbackSubmitting"
+                    :type="selectedReport.feedback === value ? 'primary' : 'default'"
+                    @click="handleFeedback(value)"
+                  >
                     {{ label }}
                   </el-button>
                 </el-button-group>
@@ -1282,14 +1425,22 @@ function errorMessage(error: unknown, fallback: string) {
               <div class="card-header">
                 <span>竞品列表</span>
                 <div class="card-actions">
-                  <span>{{ competitors.length }} 个</span>
+                  <el-input
+                    v-model="competitorKeyword"
+                    class="competitor-search-input"
+                    clearable
+                    placeholder="搜索竞品 / 官网 / 定位"
+                    :prefix-icon="Search"
+                    size="small"
+                  />
+                  <span>{{ competitorCountLabel }}</span>
                   <el-button size="small" type="primary" :icon="Plus" @click="openCompetitorDialog">
                     添加竞品
                   </el-button>
                 </div>
               </div>
             </template>
-            <el-table class="competitor-table" :data="competitors" height="520" empty-text="还没有竞品">
+            <el-table class="competitor-table" :data="filteredCompetitors" height="520" :empty-text="competitorEmptyText">
               <el-table-column prop="name" label="竞品" min-width="150" />
               <el-table-column label="官网" min-width="240">
                 <template #default="{ row }">
@@ -1431,7 +1582,7 @@ function errorMessage(error: unknown, fallback: string) {
       v-model="competitorDetailDrawerVisible"
       class="competitor-detail-drawer"
       direction="rtl"
-      size="880px"
+      size="min(98vw, 1440px)"
       :with-header="false"
     >
       <section v-loading="competitorDetailLoading" class="drawer-workspace">
@@ -1542,6 +1693,15 @@ function errorMessage(error: unknown, fallback: string) {
                     >
                       编辑
                     </el-button>
+                    <el-button
+                      link
+                      size="small"
+                      type="danger"
+                      :icon="Delete"
+                      @click="handleRemoveDraft(draft)"
+                    >
+                      移除
+                    </el-button>
                   </div>
                   <el-input v-model="draft.url" />
                   <p v-if="draft.analysisNotes">
@@ -1558,7 +1718,7 @@ function errorMessage(error: unknown, fallback: string) {
               <h3>已监控目标</h3>
             </div>
             <el-table :data="detailTargets" height="260" empty-text="还没有已监控目标">
-              <el-table-column label="目标" min-width="170" show-overflow-tooltip>
+              <el-table-column label="目标" min-width="220" show-overflow-tooltip>
                 <template #default="{ row }">
                   <el-link :href="row.url" target="_blank" :icon="Link" type="primary">
                     {{ row.title }}
@@ -1608,9 +1768,29 @@ function errorMessage(error: unknown, fallback: string) {
                   </el-tooltip>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="174">
+              <el-table-column label="采集器" width="116">
+                <template #default="{ row }">
+                  <el-tag effect="plain">
+                    {{ captureAdapterLabel(row.captureAdapter) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="320" fixed="right">
                 <template #default="{ row }">
                   <div class="row-actions">
+                    <el-select
+                      :model-value="manualCaptureAdapter(row)"
+                      class="capture-adapter-select"
+                      size="small"
+                      @change="value => setManualCaptureAdapter(row, value)"
+                    >
+                      <el-option
+                        v-for="(label, value) in captureAdapterLabels"
+                        :key="value"
+                        :label="label"
+                        :value="value"
+                      />
+                    </el-select>
                     <el-button size="small" @click="handleDetailCollect(row)">
                       采集
                     </el-button>
@@ -1800,11 +1980,31 @@ function errorMessage(error: unknown, fallback: string) {
                 {{ selectedTaskCompare.reportIds.length ? selectedTaskCompare.reportIds.join(', ') : '-' }}
               </el-descriptions-item>
             </el-descriptions>
+            <div class="source-audit">
+              <el-tag effect="plain" type="info">
+                采集器生成
+              </el-tag>
+              <span>Markdown、最终 URL、状态码、耗时、质量分来自采集适配器。</span>
+              <el-tag effect="plain" type="success">
+                规则生成
+              </el-tag>
+              <span>快照、结构化信号、字段 diff、证据强度和噪声风险来自规则链路。</span>
+              <el-tag effect="plain" type="primary">
+                AI 生成
+              </el-tag>
+              <span>material 判断、veto 和 llm_reason 来自 AI analyzer。</span>
+            </div>
           </section>
 
           <section class="drawer-section">
             <div class="section-title-row">
-              <h3>抓取诊断</h3>
+              <div>
+                <h3>抓取诊断</h3>
+                <p>这些字段由采集器和质量评分规则生成，不是 AI 生成。</p>
+              </div>
+              <el-tag effect="plain" type="info">
+                采集器 + 规则
+              </el-tag>
             </div>
             <el-descriptions v-if="selectedTaskCompare.capture" :column="2" border>
               <el-descriptions-item label="Raw Capture">
@@ -1833,7 +2033,13 @@ function errorMessage(error: unknown, fallback: string) {
 
           <section class="drawer-section">
             <div class="section-title-row">
-              <h3>快照 Hash</h3>
+              <div>
+                <h3>快照 Hash</h3>
+                <p>Hash 由快照抽取规则生成，用于判断页面结构化内容是否变化。</p>
+              </div>
+              <el-tag effect="plain" type="success">
+                规则生成
+              </el-tag>
             </div>
             <el-table
               :data="[
@@ -1859,7 +2065,10 @@ function errorMessage(error: unknown, fallback: string) {
 
           <section class="drawer-section">
             <div class="section-title-row">
-              <h3>字段变化</h3>
+              <div>
+                <h3>字段变化</h3>
+                <p>旧值/新值来自规则 diff；AI 判断只体现在 AI 标签和 AI 理由里。</p>
+              </div>
             </div>
             <el-empty v-if="selectedTaskCompare.changes.length === 0" description="未发现字段级变化" />
             <div v-else class="compare-change-list">
@@ -1867,12 +2076,34 @@ function errorMessage(error: unknown, fallback: string) {
                 <header>
                   <div>
                     <strong>{{ change.changeKind }} / {{ change.fieldPath }}</strong>
-                    <p>{{ change.reasonCodes.join(', ') }}</p>
+                    <p>{{ change.source === 'persisted' ? '已落库变化' : '实时计算变化' }}</p>
                   </div>
-                  <el-tag effect="plain">
-                    {{ change.promotionStatus }}
-                  </el-tag>
+                  <div class="change-source-tags">
+                    <el-tag effect="plain" type="success">
+                      规则 diff
+                    </el-tag>
+                    <el-tag :type="aiDecisionType(change)" effect="plain">
+                      {{ aiDecisionLabel(change) }}
+                    </el-tag>
+                    <el-tag effect="light">
+                      {{ change.promotionStatus }}
+                    </el-tag>
+                  </div>
                 </header>
+                <div class="change-origin-grid">
+                  <div>
+                    <span>规则命中</span>
+                    <p>{{ ruleReasonCodes(change).join(', ') || '-' }}</p>
+                  </div>
+                  <div>
+                    <span>AI 判断</span>
+                    <p>{{ aiReasonCodes(change).filter(code => !code.startsWith('llm_reason:')).join(', ') || '-' }}</p>
+                  </div>
+                  <div v-if="aiReasonText(change)" class="ai-reason">
+                    <span>AI 理由</span>
+                    <p>{{ aiReasonText(change) }}</p>
+                  </div>
+                </div>
                 <div class="diff-grid">
                   <div class="diff-cell old">
                     <span>上次</span>
@@ -1889,7 +2120,13 @@ function errorMessage(error: unknown, fallback: string) {
 
           <section class="drawer-section">
             <div class="section-title-row">
-              <h3>结构化内容</h3>
+              <div>
+                <h3>结构化内容</h3>
+                <p>结构化信号和内容块由快照抽取规则生成，原始 Markdown 来自采集器。</p>
+              </div>
+              <el-tag effect="plain" type="success">
+                规则生成
+              </el-tag>
             </div>
             <el-tabs>
               <el-tab-pane label="本次信号">
@@ -2039,6 +2276,16 @@ function errorMessage(error: unknown, fallback: string) {
           >
             <el-option
               v-for="(label, value) in scheduleModeLabels"
+              :key="value"
+              :label="label"
+              :value="value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="采集器">
+          <el-select v-model="scheduleForm.captureAdapter" class="full-width">
+            <el-option
+              v-for="(label, value) in captureAdapterLabels"
               :key="value"
               :label="label"
               :value="value"
@@ -2549,6 +2796,9 @@ function errorMessage(error: unknown, fallback: string) {
 .task-filter-select {
   width: 180px;
 }
+.competitor-search-input {
+  width: 220px;
+}
 .table-card:last-child {
   grid-column: 1 / -1;
 }
@@ -2577,6 +2827,9 @@ function errorMessage(error: unknown, fallback: string) {
   gap: 4px;
   align-items: center;
   white-space: nowrap;
+}
+.capture-adapter-select {
+  width: 104px;
 }
 .tooltip-button-wrap {
   display: inline-flex;
@@ -2657,6 +2910,58 @@ function errorMessage(error: unknown, fallback: string) {
   :deep(.el-descriptions__content) {
     word-break: break-word;
   }
+}
+.source-audit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  padding: 12px;
+  margin-top: 12px;
+  background: var(--ci-surface-raised);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  span {
+    min-width: 0;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--ci-text-secondary);
+  }
+}
+.change-source-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.change-origin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+  div {
+    min-width: 0;
+    padding: 10px 12px;
+    background: var(--ci-surface-raised);
+    border: 1px solid var(--ci-border-soft);
+    border-radius: 8px;
+  }
+  span {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ci-text-secondary);
+  }
+  p {
+    margin: 0;
+    line-height: 1.55;
+    color: var(--ci-text);
+    word-break: break-word;
+  }
+}
+.ai-reason {
+  grid-column: 1 / -1;
 }
 .compare-change-list,
 .signal-stack {
@@ -2767,6 +3072,9 @@ function errorMessage(error: unknown, fallback: string) {
   }
   .drawer-candidate-row {
     grid-template-columns: 1fr;
+  }
+  .competitor-search-input {
+    width: 100%;
   }
 }
 </style>

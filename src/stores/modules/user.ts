@@ -8,8 +8,16 @@ export const useUserStore = defineStore(
   () => {
     const token = ref<string>();
     const router = useRouter();
-    const setToken = (value: string) => {
-      token.value = value;
+    const normalizeToken = (value?: string | null) => {
+      if (!value)
+        return '';
+      const nextValue = String(value).trim();
+      return nextValue && nextValue !== 'undefined' && nextValue !== 'null' ? nextValue : '';
+    };
+
+    const setToken = (value?: string | null) => {
+      const nextToken = normalizeToken(value);
+      token.value = nextToken || void 0;
     };
     const clearToken = () => {
       token.value = void 0;

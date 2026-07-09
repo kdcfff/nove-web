@@ -1,4 +1,5 @@
 import type {
+  CaptureAdapter,
   CompanyProfileVo,
   CompetitorRequest,
   CompetitorVo,
@@ -75,8 +76,13 @@ export function updateMonitorTargetSchedule(id: number, data: MonitorTargetSched
   return unwrap<MonitorTargetVo>(put<MonitorTargetVo>(`/intelligence/targets/${id}/schedule`, data).json());
 }
 
-export function triggerTargetCollect(id: number, triggerSource?: 'manual' | 'competitor_manual') {
-  const query = triggerSource ? `?triggerSource=${triggerSource}` : '';
+export function triggerTargetCollect(id: number, triggerSource?: 'manual' | 'competitor_manual', adapter?: CaptureAdapter) {
+  const params = new URLSearchParams();
+  if (triggerSource)
+    params.set('triggerSource', triggerSource);
+  if (adapter)
+    params.set('adapter', adapter);
+  const query = params.toString() ? `?${params.toString()}` : '';
   return unwrap<TaskRunVo>(post<TaskRunVo>(`/intelligence/targets/${id}/collect${query}`).json());
 }
 

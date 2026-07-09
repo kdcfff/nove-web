@@ -22,11 +22,24 @@ export const request = hookFetch.create<BaseResponse, 'data' | 'rows'>({
 
 function jwtPlugin(): HookFetchPlugin<BaseResponse> {
   const userStore = useUserStore();
+  const validToken = (token?: string) => {
+    if (!token)
+      return '';
+    const value = String(token).trim();
+    return value && value !== 'undefined' && value !== 'null' ? value : '';
+  };
   return {
     name: 'jwt',
     beforeRequest: async (config) => {
       config.headers = new Headers(config.headers);
-      config.headers.set('authorization', `Bearer ${userStore.token}`);
+      const token = validToken(userStore.token);
+      if (token) {
+        config.headers.set('authorization', `Bearer ${token}`);
+      }
+      else {
+        config.headers.delete('authorization');
+        userStore.clearToken();
+      }
       config.headers.set('ClientID', import.meta.env.VITE_CLIENT_ID);
       return config;
     },

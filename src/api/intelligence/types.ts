@@ -34,6 +34,7 @@ export interface MonitorTargetVo {
   lastCollectedAt?: string;
   source?: MonitorTargetSource;
   analysisNotes?: string;
+  captureAdapter?: CaptureAdapter;
   scheduleEnabled?: boolean;
   scheduleMode?: ScheduleMode;
   scheduleTime?: string;
@@ -48,6 +49,7 @@ export interface MonitorTargetVo {
 export type MonitorTargetType = 'official_site' | 'pricing' | 'docs' | 'blog' | 'changelog' | 'rss';
 export type MonitorTargetSource = 'homepage_link' | 'html_link' | 'feed_hint' | 'rule_fallback' | 'manual';
 export type ScheduleMode = 'off' | 'daily' | 'weekly' | 'cron';
+export type CaptureAdapter = 'auto' | 'nova_rendered' | 'firecrawl';
 export type TaskTriggerSource = 'manual' | 'competitor_manual' | 'scheduled';
 
 export interface MonitorTargetRequest {
@@ -65,6 +67,7 @@ export interface MonitorTargetScheduleRequest {
   scheduleTime?: string;
   scheduleWeekday?: number;
   scheduleCron?: string;
+  captureAdapter?: CaptureAdapter;
 }
 
 export interface ReportSummaryVo {
