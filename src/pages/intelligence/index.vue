@@ -12,6 +12,8 @@ import type {
   ScheduleMode,
   TaskCompareVo,
   TaskRunVo,
+  UserProfileReportDetailVo,
+  UserProfileReportSummaryVo,
   UserProfileRequest,
   UserProfileVo,
 } from '@/api/intelligence/types';
@@ -34,13 +36,16 @@ import {
   createMonitorTarget,
   deleteCompetitor,
   deleteMonitorTarget,
+  generateUserProfileReport,
   getReportDetail,
   getTaskCompare,
   getUserProfile,
+  getUserProfileReport,
   listCompetitors,
   listInboxReports,
   listMonitorTargets,
   listTaskRuns,
+  listUserProfileReports,
   markReportRead,
   recommendMonitorTargets,
   submitReportFeedback,
@@ -49,6 +54,7 @@ import {
   updateUserProfile,
   writeReportToKnowledge,
 } from '@/api/intelligence';
+import { codeXRender } from '@/utils/markdownRenderers';
 
 const loading = ref(false);
 const discoveryLoading = ref(false);
@@ -58,6 +64,9 @@ const deletingTargetId = ref<number>();
 const taskLoading = ref(false);
 const profileLoading = ref(false);
 const profileSaving = ref(false);
+const profileReportLoading = ref(false);
+const profileReportGenerating = ref(false);
+const profileReportDetailLoading = ref(false);
 const feedbackSubmitting = ref(false);
 const collectingCompetitorIds = ref<number[]>([]);
 const pageError = ref('');
@@ -68,6 +77,9 @@ const reports = ref<ReportSummaryVo[]>([]);
 const tasks = ref<TaskRunVo[]>([]);
 const selectedReport = ref<ReportDetailVo | null>(null);
 const currentUserProfile = ref<UserProfileVo | null>(null);
+const profileReportCompetitorId = ref<number>();
+const profileReports = ref<UserProfileReportSummaryVo[]>([]);
+const selectedProfileReport = ref<UserProfileReportDetailVo | null>(null);
 type DraftSource = MonitorTargetSource;
 type ValidationStatus = 'pending' | 'success' | 'failed';
 type CollectionStatus = 'idle' | 'saving' | 'collecting' | 'baseline' | 'failed';
@@ -107,6 +119,7 @@ const editingManualDraft = ref<DraftTarget | null>(null);
 const scheduleTarget = ref<MonitorTargetVo | null>(null);
 const manualCaptureAdapters = reactive<Record<number, CaptureAdapter>>({});
 let detailLoadSeq = 0;
+let profileReportLoadSeq = 0;
 
 const competitorForm = reactive({
   name: '',
@@ -161,6 +174,9 @@ const manualTargetDialogTitle = computed(() => editingManualDraft.value ? '编�
 const userProfileUpdatedAt = computed(() => currentUserProfile.value?.updatedAt || currentUserProfile.value?.version?.updatedAt);
 const userProfileVersionLabel = computed(() => currentUserProfile.value?.version?.id ? `v${currentUserProfile.value.version.id}` : '未保存');
 const userProfileStatusType = computed<TagType>(() => currentUserProfile.value ? 'success' : 'info');
+const selectedProfileReportCompetitor = computed(() => competitors.value.find(competitor => sameId(competitor.id, profileReportCompetitorId.value)));
+const selectedProfileReportId = computed(() => selectedProfileReport.value?.id);
+const hasProfileReports = computed(() => profileReports.value.length > 0);
 const filteredReports = computed(() => reports.value.filter((report) => {
   const keyword = reportKeyword.value.trim().toLowerCase();
   const matchesKeyword = !keyword
@@ -264,6 +280,12 @@ const triggerSourceLabels: Record<string, string> = {
   scheduled: '定时',
 };
 
+const profileReportStatusLabels: Record<string, string> = {
+  success: '成功',
+  failed: '失败',
+  running: '生成中',
+};
+
 interface UserProfileField {
   key: keyof Omit<UserProfileRequest, 'profileName' | 'markdownNotes'>;
   label: string;
@@ -364,6 +386,106 @@ async function handleSaveUserProfile() {
   }
   finally {
     profileSaving.value = false;
+  }
+}
+
+function resetProfileReportState() {
+  profileReports.value = [];
+  selectedProfileReport.value = null;
+}
+
+function ensureProfileReportCompetitor() {
+  const exists = competitors.value.some(competitor => sameId(competitor.id, profileReportCompetitorId.value));
+  if (!exists)
+    profileReportCompetitorId.value = competitors.value[0]?.id;
+}
+
+async function loadUserProfileReportHistory(openLatest = false) {
+  ensureProfileReportCompetitor();
+  const competitorId = profileReportCompetitorId.value;
+  const requestSeq = ++profileReportLoadSeq;
+  selectedProfileReport.value = openLatest ? null : selectedProfileReport.value;
+  if (!competitorId) {
+    resetProfileReportState();
+    return;
+  }
+  profileReportLoading.value = true;
+  try {
+    const history = await listUserProfileReports(competitorId);
+    if (requestSeq !== profileReportLoadSeq || !sameId(profileReportCompetitorId.value, competitorId))
+      return;
+    profileReports.value = history.filter(report => belongsToCompetitor(report, competitorId));
+    if (openLatest && profileReports.value[0])
+      await openUserProfileReport(profileReports.value[0]);
+    else if (selectedProfileReport.value && !profileReports.value.some(report => sameId(report.id, selectedProfileReport.value?.id)))
+      selectedProfileReport.value = null;
+  }
+  catch (error) {
+    if (requestSeq !== profileReportLoadSeq || !sameId(profileReportCompetitorId.value, competitorId))
+      return;
+    resetProfileReportState();
+    ElMessage.error(errorMessage(error, '画像研报历史加载失败'));
+  }
+  finally {
+    if (requestSeq === profileReportLoadSeq && sameId(profileReportCompetitorId.value, competitorId))
+      profileReportLoading.value = false;
+  }
+}
+
+async function handleProfileReportCompetitorChange() {
+  selectedProfileReport.value = null;
+  await loadUserProfileReportHistory(true);
+}
+
+async function openUserProfileReport(report: UserProfileReportSummaryVo | UserProfileReportDetailVo) {
+  const reportId = report.id;
+  const competitorId = profileReportCompetitorId.value;
+  profileReportDetailLoading.value = true;
+  try {
+    const detail = await getUserProfileReport(reportId);
+    if (competitorId && !sameId(profileReportCompetitorId.value, competitorId))
+      return;
+    selectedProfileReport.value = detail;
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '画像研报详情加载失败'));
+  }
+  finally {
+    if (!competitorId || sameId(profileReportCompetitorId.value, competitorId))
+      profileReportDetailLoading.value = false;
+  }
+}
+
+async function handleGenerateUserProfileReport() {
+  if (profileReportGenerating.value)
+    return;
+  if (!currentUserProfile.value) {
+    ElMessage.warning('请先保存我方用户画像');
+    return;
+  }
+  if (!profileReportCompetitorId.value) {
+    ElMessage.warning('请选择一个竞品');
+    return;
+  }
+  const competitorId = profileReportCompetitorId.value;
+  profileReportGenerating.value = true;
+  try {
+    const detail = await generateUserProfileReport({ competitorId, triggerSource: 'manual' });
+    if (!sameId(profileReportCompetitorId.value, competitorId))
+      return;
+    selectedProfileReport.value = detail;
+    const history = await listUserProfileReports(competitorId);
+    if (!sameId(profileReportCompetitorId.value, competitorId))
+      return;
+    profileReports.value = history.filter(report => belongsToCompetitor(report, competitorId));
+    ElMessage.success('画像研报已生成');
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '画像研报生成失败'));
+  }
+  finally {
+    if (sameId(profileReportCompetitorId.value, competitorId))
+      profileReportGenerating.value = false;
   }
 }
 
@@ -713,6 +835,20 @@ function triggerSourceType(source?: string): TagType {
   return 'info';
 }
 
+function profileReportStatusLabel(status?: string) {
+  return profileReportStatusLabels[status || ''] || status || '未知';
+}
+
+function profileReportStatusType(status?: string): TagType {
+  if (status === 'success')
+    return 'success';
+  if (status === 'failed')
+    return 'danger';
+  if (status === 'running')
+    return 'warning';
+  return 'info';
+}
+
 function priorityType(priority: ReportSummaryVo['priority']) {
   return priorityMap[priority];
 }
@@ -816,12 +952,14 @@ async function loadWorkbench() {
     syncManualCaptureAdapters(targetData);
     reports.value = reportData;
     tasks.value = taskData;
+    ensureProfileReportCompetitor();
     if (reportData[0]) {
       await openReport(reportData[0]);
     }
     else {
       selectedReport.value = null;
     }
+    await loadUserProfileReportHistory(true);
   }
   catch (error) {
     pageError.value = errorMessage(error, '工作台加载失败，请检查登录状态或后端服务');
@@ -830,6 +968,7 @@ async function loadWorkbench() {
     reports.value = [];
     tasks.value = [];
     selectedReport.value = null;
+    resetProfileReportState();
   }
   finally {
     loading.value = false;
@@ -1108,6 +1247,10 @@ async function handleDeleteCompetitor(competitor: CompetitorVo) {
       detailTargets.value = [];
       detailReports.value = [];
       detailTasks.value = [];
+    }
+    if (sameId(profileReportCompetitorId.value, competitor.id)) {
+      profileReportCompetitorId.value = undefined;
+      resetProfileReportState();
     }
     drafts.value = drafts.value.filter(draft => !belongsToCompetitor(draft, competitor.id));
     startupRuns.value = startupRuns.value.filter(run => !belongsToCompetitor(run.target, competitor.id));
@@ -1399,6 +1542,181 @@ function errorMessage(error: unknown, fallback: string) {
               </div>
             </section>
           </aside>
+
+          <section class="surface profile-report-panel">
+            <header class="profile-report-header">
+              <div>
+                <span class="eyebrow">User Profile Report</span>
+                <h3>画像竞品研报</h3>
+              </div>
+              <div class="profile-report-actions">
+                <el-select
+                  v-model="profileReportCompetitorId"
+                  class="profile-report-select"
+                  filterable
+                  placeholder="选择竞品"
+                  @change="handleProfileReportCompetitorChange"
+                >
+                  <el-option
+                    v-for="competitor in competitors"
+                    :key="competitor.id"
+                    :label="competitor.name"
+                    :value="competitor.id"
+                  />
+                </el-select>
+                <el-button
+                  :icon="Refresh"
+                  :disabled="!profileReportCompetitorId"
+                  :loading="profileReportLoading"
+                  @click="loadUserProfileReportHistory(true)"
+                >
+                  刷新历史
+                </el-button>
+                <el-button
+                  type="primary"
+                  :icon="DocumentChecked"
+                  :disabled="!profileReportCompetitorId || !currentUserProfile"
+                  :loading="profileReportGenerating"
+                  @click="handleGenerateUserProfileReport"
+                >
+                  生成研报
+                </el-button>
+              </div>
+            </header>
+
+            <div class="profile-report-layout">
+              <aside v-loading="profileReportLoading" class="profile-report-history">
+                <div class="report-context">
+                  <span>当前竞品</span>
+                  <strong>{{ selectedProfileReportCompetitor?.name || '未选择' }}</strong>
+                  <p>{{ selectedProfileReportCompetitor?.positioning || selectedProfileReportCompetitor?.homepage || '-' }}</p>
+                </div>
+
+                <el-empty v-if="!hasProfileReports" description="暂无画像研报" />
+                <el-scrollbar v-else class="profile-report-scroll">
+                  <button
+                    v-for="report in profileReports"
+                    :key="report.id"
+                    class="profile-report-row"
+                    :class="{ 'is-active': selectedProfileReportId === report.id }"
+                    @click="openUserProfileReport(report)"
+                  >
+                    <span class="report-head">
+                      <strong>{{ report.summary || `${report.competitorName} 画像研报` }}</strong>
+                      <el-tag :type="profileReportStatusType(report.status)" effect="light">
+                        {{ profileReportStatusLabel(report.status) }}
+                      </el-tag>
+                    </span>
+                    <span class="report-footer">
+                      <span>{{ report.evidenceCount || 0 }} 条证据</span>
+                      <span>{{ report.profileVersion?.id ? `v${report.profileVersion.id}` : '无版本' }}</span>
+                      <span>{{ formatTime(report.createdAt) }}</span>
+                    </span>
+                    <span v-if="report.failureReason" class="report-failure">{{ report.failureReason }}</span>
+                  </button>
+                </el-scrollbar>
+              </aside>
+
+              <article v-loading="profileReportDetailLoading" class="profile-report-detail">
+                <template v-if="selectedProfileReport">
+                  <div class="detail-title">
+                    <div>
+                      <span class="eyebrow">{{ selectedProfileReport.competitorName }} / {{ selectedProfileReport.profileVersion?.id ? `v${selectedProfileReport.profileVersion.id}` : 'Profile' }}</span>
+                      <h2>{{ selectedProfileReport.summary || '画像竞品研报' }}</h2>
+                    </div>
+                    <el-tag :type="profileReportStatusType(selectedProfileReport.status)" size="large">
+                      {{ profileReportStatusLabel(selectedProfileReport.status) }}
+                    </el-tag>
+                  </div>
+
+                  <el-descriptions :column="4" border class="report-descriptions">
+                    <el-descriptions-item label="触发">
+                      {{ triggerSourceLabel(selectedProfileReport.triggerSource) }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="证据">
+                      {{ selectedProfileReport.evidenceCount || selectedProfileReport.evidence.length }} 条
+                    </el-descriptions-item>
+                    <el-descriptions-item label="画像版本">
+                      {{ selectedProfileReport.profileVersion?.id ? `v${selectedProfileReport.profileVersion.id}` : '-' }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="生成时间">
+                      {{ formatTime(selectedProfileReport.createdAt) }}
+                    </el-descriptions-item>
+                  </el-descriptions>
+
+                  <el-alert
+                    v-if="selectedProfileReport.failureReason"
+                    class="profile-report-alert"
+                    show-icon
+                    type="error"
+                    :closable="false"
+                    :title="selectedProfileReport.failureReason"
+                  />
+
+                  <div class="profile-report-sections">
+                    <section>
+                      <h3>关键洞察</h3>
+                      <el-empty v-if="selectedProfileReport.keyInsights.length === 0" description="暂无洞察" />
+                      <ul v-else>
+                        <li v-for="insight in selectedProfileReport.keyInsights" :key="insight">
+                          {{ insight }}
+                        </li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3>画像影响</h3>
+                      <el-empty v-if="selectedProfileReport.profileImpacts.length === 0" description="暂无影响" />
+                      <ul v-else>
+                        <li v-for="impact in selectedProfileReport.profileImpacts" :key="impact">
+                          {{ impact }}
+                        </li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3>建议动作</h3>
+                      <el-empty v-if="selectedProfileReport.recommendedActions.length === 0" description="暂无建议" />
+                      <el-timeline v-else>
+                        <el-timeline-item v-for="action in selectedProfileReport.recommendedActions" :key="action">
+                          {{ action }}
+                        </el-timeline-item>
+                      </el-timeline>
+                    </section>
+                    <section>
+                      <h3>证据</h3>
+                      <el-empty v-if="selectedProfileReport.evidence.length === 0" description="暂无证据" />
+                      <div v-else class="profile-evidence-list">
+                        <article v-for="item in selectedProfileReport.evidence" :key="`${item.field}-${item.sourceUrl}`" class="profile-evidence-item">
+                          <header>
+                            <el-tag effect="plain">
+                              {{ item.field }}
+                            </el-tag>
+                            <el-link v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" :icon="Link">
+                              来源
+                            </el-link>
+                          </header>
+                          <p>{{ item.snippet || item.newValue || item.oldValue }}</p>
+                        </article>
+                      </div>
+                    </section>
+                  </div>
+
+                  <section v-if="selectedProfileReport.markdownContent" class="profile-markdown-section">
+                    <div class="section-title-row">
+                      <h3>研报正文</h3>
+                    </div>
+                    <XMarkdown
+                      :markdown="selectedProfileReport.markdownContent"
+                      :code-x-render="codeXRender"
+                      class="profile-markdown-body"
+                      :themes="{ light: 'github-light', dark: 'github-dark' }"
+                      default-theme-mode="light"
+                    />
+                  </section>
+                </template>
+                <el-empty v-else description="选择或生成一份画像研报" />
+              </article>
+            </div>
+          </section>
         </section>
       </el-tab-pane>
 
@@ -2995,6 +3313,198 @@ function errorMessage(error: unknown, fallback: string) {
 .profile-status-panel {
   padding: 14px;
 }
+.profile-report-panel {
+  grid-column: 1 / -1;
+  padding: 14px;
+}
+.profile-report-header,
+.profile-report-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.profile-report-header {
+  justify-content: space-between;
+  margin-bottom: 14px;
+  h3 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 26px;
+    letter-spacing: 0;
+  }
+}
+.profile-report-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.profile-report-select {
+  width: 220px;
+}
+.profile-report-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.profile-report-history,
+.profile-report-detail {
+  min-height: 520px;
+  padding: 12px;
+  background: var(--ci-surface-raised);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+}
+.report-context {
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  span {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ci-text-secondary);
+  }
+  strong {
+    display: block;
+    line-height: 22px;
+  }
+  p {
+    display: -webkit-box;
+    margin: 6px 0 0;
+    overflow: hidden;
+    line-height: 1.55;
+    color: var(--ci-text-secondary);
+    word-break: break-word;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+}
+.profile-report-scroll {
+  height: 426px;
+}
+.profile-report-row {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 12px 12px 15px;
+  margin-bottom: 8px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  &::before {
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: 0;
+    width: 3px;
+    content: '';
+    background: transparent;
+    border-radius: 0 999px 999px 0;
+  }
+}
+.profile-report-row:hover,
+.profile-report-row.is-active {
+  background: #f8fbff;
+  border-color: #9bb9ff;
+  box-shadow: 0 8px 18px rgb(37 99 235 / 8%);
+}
+.profile-report-row.is-active::before {
+  background: var(--ci-primary);
+}
+.report-failure {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ci-danger);
+}
+.profile-report-alert {
+  margin-top: 12px;
+}
+.profile-report-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  > section {
+    min-width: 0;
+    padding: 14px;
+    background: var(--ci-surface);
+    border: 1px solid var(--ci-border-soft);
+    border-radius: 8px;
+  }
+  h3 {
+    margin: 0 0 10px;
+    font-size: 15px;
+    line-height: 22px;
+    letter-spacing: 0;
+  }
+  ul {
+    padding-left: 18px;
+    margin: 0;
+  }
+  li {
+    line-height: 1.65;
+    color: var(--ci-text-secondary);
+  }
+  :deep(.el-timeline) {
+    padding-left: 0;
+  }
+}
+.profile-evidence-list {
+  display: grid;
+  gap: 8px;
+}
+.profile-evidence-item {
+  padding: 10px 12px;
+  background: var(--ci-surface-raised);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+  header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  p {
+    margin: 0;
+    line-height: 1.6;
+    color: var(--ci-text-secondary);
+    word-break: break-word;
+  }
+}
+.profile-markdown-section {
+  padding: 14px;
+  margin-top: 14px;
+  background: var(--ci-surface);
+  border: 1px solid var(--ci-border-soft);
+  border-radius: 8px;
+}
+.profile-markdown-body {
+  padding: 4px 2px 0;
+  line-height: 1.72;
+  color: var(--ci-text);
+  :deep(h1),
+  :deep(h2),
+  :deep(h3) {
+    letter-spacing: 0;
+  }
+  :deep(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  :deep(pre) {
+    border-radius: 8px;
+  }
+}
 .profile-summary-list {
   display: grid;
   gap: 10px;
@@ -3279,9 +3789,11 @@ function errorMessage(error: unknown, fallback: string) {
 @media (width <= 980px) {
   .workbench-grid,
   .profile-workspace,
+  .profile-report-layout,
   .management-layout,
   .targets-layout,
   .entities-layout,
+  .profile-report-sections,
   .analysis-grid {
     grid-template-columns: 1fr;
   }
@@ -3320,10 +3832,15 @@ function errorMessage(error: unknown, fallback: string) {
   }
   .header-actions,
   .detail-actions,
+  .profile-report-header,
+  .profile-report-actions,
   .drawer-header,
   .section-title-row {
     flex-direction: column;
     justify-content: flex-start;
+  }
+  .profile-report-select {
+    width: 100%;
   }
   .drawer-candidate-row {
     grid-template-columns: 1fr;
