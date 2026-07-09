@@ -314,7 +314,7 @@
 
 ### Task T5: 前端构建与竞品情报 smoke 验证
 
-- [ ] **状态**：未开始
+- [x] **状态**：完成
 
 **代码仓范围：**
 - 根项目：`nova-web`
@@ -334,21 +334,24 @@
 **步骤 1：运行构建**
 - Run: `pnpm build`
 - Expected: PASS。现有 KaTeX 字体、`:deep`、大 chunk 等 warning 不算失败。
+- Result: PASS，执行 `pnpm build`，`vue-tsc -b && vite build` 通过；仅有既有 KaTeX 字体、`:deep` 和 chunk size warning。
 
 **步骤 2：确认运行服务 cwd**
 - Run: `lsof -iTCP -sTCP:LISTEN -n -P | rg "(java|node|6039|5173|5174)"`
 - Expected: 找到服务后用 `lsof -a -p <pid> -d cwd -Fn` 确认 cwd 属于当前分支/工作区；否则不做 browser smoke。
+- Result: PASS，后端 PID `76325` cwd 为 `/Users/kongdecheng/workspace/nova/nova-backend`，前端 PID `89830` cwd 为 `/Users/kongdecheng/workspace/nova/nova-web`；前端监听 `localhost:5173`，API 指向 `http://127.0.0.1:6039`。
 
 **步骤 3：浏览器 smoke**
 - Run: 手动或浏览器工具打开 `/intelligence`
 - Expected: 既有路径不回归；新增画像研报路径按后端就绪程度验证。
+- Result: PASS，浏览器打开 `http://localhost:5173/intelligence`，确认竞品列表可加载并可新建 smoke 竞品；切到「我方画像」后保存 `Nova ICP Smoke 20260709`，页面回显当前生效版本 `v2075141722395930625`；点击「生成研报」后提示「画像研报已生成」，历史出现 1 条成功记录，详情展示触发、证据、画像版本、生成时间、关键洞察、画像影响、建议动作、证据和 Markdown 正文。后端本地/远程 `crm` 已应用 `docs/script/sql/update/updat-0425.sql` 中的 `intel_user_profile_version`、`intel_user_profile_report` DDL，复测不再出现 table-not-found。
 
 **步骤 4：提交（频繁提交；commit message 必须中文）**
 - Commit message: `验证画像研报前端工作台`
 - 审计信息：
   - repo: `root`
     branch: `003-user-profile-research-report`
-    commit: `<执行后回填>`
+    commit: `当前提交（见 git log）`
     pr: `<执行后回填>`
     changed_files:
       - `.aisdlc/specs/003-user-profile-research-report/implementation/plan.md`
