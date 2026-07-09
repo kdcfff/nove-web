@@ -139,7 +139,7 @@
 
 ### Task T1: Markdown 组件与 ADR 缺口前置验证
 
-- [ ] **状态**：未开始
+- [x] **状态**：完成
 
 **代码仓范围：**
 - 根项目：`nova-web`
@@ -160,6 +160,7 @@
 **步骤 1：验证现有 Markdown 组件**
 - Run: `pnpm build`
 - Expected: PASS，当前基线可构建；如当前基线失败，记录失败点再继续局部组件验证。
+- Result: PASS，基线 `pnpm build` 通过；仅有既有 KaTeX 字体、`:deep` 和 chunk size warning。
 
 **步骤 2：写最少实现**
 - 修改点：如需局部验证，在 `src/pages/intelligence/index.vue` 临时/最小引入 `XMarkdown` 渲染样例报告；验证后保留为后续 T4 基础或回退。
@@ -167,6 +168,7 @@
 **步骤 3：运行验证**
 - Run: `pnpm build`
 - Expected: PASS，`XMarkdown` 类型和样式兼容；若 FAIL，记录失败并决定是否新增依赖或降级。
+- Result: PASS，工程已安装并注册 `vue-element-plus-x`，聊天页现有 `XMarkdown` 用法可复用；本批不新增依赖、不修改 `package.json` 和 `pnpm-lock.yaml`。
 
 **步骤 4：提交（频繁提交；commit message 必须中文）**
 - Commit message: `验证画像研报 Markdown 组件方案`
