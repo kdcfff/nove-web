@@ -31,3 +31,9 @@ dist-ssr
 
 # Local isolated worktrees
 .worktrees/
+
+# Local/private compose overrides
+docker-compose*.local.yml
+docker-compose*.local.yaml
+docker-compose*.private.yml
+docker-compose*.private.yaml
