@@ -185,7 +185,7 @@
 
 ### Task T2: 前端 API 类型与 wrapper
 
-- [ ] **状态**：未开始
+- [x] **状态**：完成
 
 **代码仓范围：**
 - 根项目：`nova-web`
@@ -213,6 +213,7 @@
 **步骤 3：运行验证**
 - Run: `pnpm build`
 - Expected: PASS 或仅剩页面未接入导致的预期失败；API 类型本身无 TS 错误。
+- Result: PASS，执行 `pnpm build`，`vue-tsc -b && vite build` 通过；仅有既有 KaTeX 字体、`:deep` 和 chunk size warning。
 
 **步骤 4：提交（频繁提交；commit message 必须中文）**
 - Commit message: `新增用户画像研报前端 API 契约`

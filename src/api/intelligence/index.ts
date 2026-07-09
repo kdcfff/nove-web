@@ -11,6 +11,11 @@ import type {
   ReportSummaryVo,
   TaskCompareVo,
   TaskRunVo,
+  UserProfileReportDetailVo,
+  UserProfileReportRequest,
+  UserProfileReportSummaryVo,
+  UserProfileRequest,
+  UserProfileVo,
 } from './types';
 import { del, get, post, put } from '@/utils/request';
 
@@ -42,6 +47,26 @@ export function getCompanyProfile() {
 
 export function updateCompanyProfile(data: CompanyProfileVo) {
   return unwrap<CompanyProfileVo>(put<CompanyProfileVo>('/intelligence/company-profile', data).json());
+}
+
+export function getUserProfile() {
+  return unwrap<UserProfileVo | null>(get<UserProfileVo | null>('/intelligence/user-profile').json());
+}
+
+export function updateUserProfile(data: UserProfileRequest) {
+  return unwrap<UserProfileVo>(put<UserProfileVo>('/intelligence/user-profile', data).json());
+}
+
+export function generateUserProfileReport(data: UserProfileReportRequest) {
+  return unwrap<UserProfileReportDetailVo>(post<UserProfileReportDetailVo>('/intelligence/user-profile-reports/generate', data).json());
+}
+
+export function listUserProfileReports(competitorId?: number) {
+  return unwrap<UserProfileReportSummaryVo[]>(get<UserProfileReportSummaryVo[]>('/intelligence/user-profile-reports', competitorId != null ? { competitorId } : undefined).json());
+}
+
+export function getUserProfileReport(id: number) {
+  return unwrap<UserProfileReportDetailVo>(get<UserProfileReportDetailVo>(`/intelligence/user-profile-reports/${id}`).json());
 }
 
 export function listCompetitors() {

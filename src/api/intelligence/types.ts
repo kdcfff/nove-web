@@ -6,6 +6,57 @@ export interface CompanyProfileVo {
   positioning: string;
 }
 
+export interface UserProfileVersionVo {
+  id: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserProfileRequest {
+  profileName: string;
+  targetUsers: string;
+  scenario: string;
+  painPoints: string;
+  motivations: string;
+  decisionFactors: string;
+  objections: string;
+  positioning: string;
+  keyMetrics: string;
+  markdownNotes: string;
+}
+
+export interface UserProfileVo extends UserProfileRequest {
+  id: number;
+  version: UserProfileVersionVo;
+  updatedAt?: string;
+}
+
+export interface UserProfileReportRequest {
+  competitorId: number;
+  triggerSource?: 'manual' | string;
+}
+
+export interface UserProfileReportSummaryVo {
+  id: number;
+  competitorId: number;
+  competitorName: string;
+  profileVersion: UserProfileVersionVo;
+  triggerSource: string;
+  status: 'success' | 'failed' | 'running' | string;
+  summary?: string;
+  evidenceCount: number;
+  createdAt?: string;
+  failureReason?: string;
+}
+
+export interface UserProfileReportDetailVo extends UserProfileReportSummaryVo {
+  keyInsights: string[];
+  profileImpacts: string[];
+  evidence: EvidenceVo[];
+  recommendedActions: string[];
+  markdownContent?: string;
+}
+
 export interface CompetitorVo {
   id: number;
   name: string;
