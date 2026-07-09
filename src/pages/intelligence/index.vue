@@ -120,6 +120,9 @@ const scheduleTarget = ref<MonitorTargetVo | null>(null);
 const manualCaptureAdapters = reactive<Record<number, CaptureAdapter>>({});
 let detailLoadSeq = 0;
 let profileReportLoadSeq = 0;
+let profileReportPollingTimer: ReturnType<typeof setInterval> | undefined;
+let profileReportPolling = false;
+const PROFILE_REPORT_POLL_INTERVAL_MS = 2500;
 
 const competitorForm = reactive({
   name: '',
@@ -397,6 +400,7 @@ async function handleSaveUserProfile() {
 function resetProfileReportState() {
   profileReports.value = [];
   selectedProfileReport.value = null;
+  stopProfileReportPolling();
 }
 
 function ensureProfileReportCompetitor() {
@@ -424,6 +428,7 @@ async function loadUserProfileReportHistory(openLatest = false) {
       await openUserProfileReport(profileReports.value[0]);
     else if (selectedProfileReport.value && !profileReports.value.some(report => sameId(report.id, selectedProfileReport.value?.id)))
       selectedProfileReport.value = null;
+    syncProfileReportPolling();
   }
   catch (error) {
     if (requestSeq !== profileReportLoadSeq || !sameId(profileReportCompetitorId.value, competitorId))
@@ -438,6 +443,7 @@ async function loadUserProfileReportHistory(openLatest = false) {
 }
 
 async function handleProfileReportCompetitorChange() {
+  stopProfileReportPolling();
   selectedProfileReport.value = null;
   await loadUserProfileReportHistory(true);
 }
@@ -451,6 +457,7 @@ async function openUserProfileReport(report: UserProfileReportSummaryVo | UserPr
     if (competitorId && !sameId(profileReportCompetitorId.value, competitorId))
       return;
     selectedProfileReport.value = detail;
+    syncProfileReportPolling();
   }
   catch (error) {
     ElMessage.error(errorMessage(error, '画像研报详情加载失败'));
@@ -479,18 +486,80 @@ async function handleGenerateUserProfileReport() {
     if (!sameId(profileReportCompetitorId.value, competitorId))
       return;
     selectedProfileReport.value = detail;
-    const history = await listUserProfileReports(competitorId);
-    if (!sameId(profileReportCompetitorId.value, competitorId))
-      return;
-    profileReports.value = history.filter(report => belongsToCompetitor(report, competitorId));
-    ElMessage.success('画像研报已生成');
+    await loadUserProfileReportHistory(false);
+    if (detail.status === 'running') {
+      startProfileReportPolling();
+      ElMessage.success('画像研报已开始生成，可继续浏览其他内容');
+    }
+    else {
+      ElMessage.success('画像研报已生成');
+    }
   }
   catch (error) {
     ElMessage.error(errorMessage(error, '画像研报生成失败'));
   }
   finally {
-    if (sameId(profileReportCompetitorId.value, competitorId))
-      profileReportGenerating.value = false;
+    profileReportGenerating.value = false;
+  }
+}
+
+function hasRunningProfileReport() {
+  return selectedProfileReport.value?.status === 'running'
+    || profileReports.value.some(report => report.status === 'running');
+}
+
+function syncProfileReportPolling() {
+  if (hasRunningProfileReport()) {
+    startProfileReportPolling();
+    return;
+  }
+  stopProfileReportPolling();
+}
+
+function startProfileReportPolling() {
+  if (profileReportPollingTimer)
+    return;
+  profileReportPollingTimer = setInterval(() => {
+    void pollProfileReports();
+  }, PROFILE_REPORT_POLL_INTERVAL_MS);
+}
+
+function stopProfileReportPolling() {
+  if (!profileReportPollingTimer)
+    return;
+  clearInterval(profileReportPollingTimer);
+  profileReportPollingTimer = undefined;
+  profileReportPolling = false;
+}
+
+async function pollProfileReports() {
+  if (profileReportPolling)
+    return;
+  const competitorId = profileReportCompetitorId.value;
+  if (!competitorId) {
+    stopProfileReportPolling();
+    return;
+  }
+  profileReportPolling = true;
+  const selectedId = selectedProfileReport.value?.id;
+  try {
+    const [history, detail] = await Promise.all([
+      listUserProfileReports(competitorId),
+      selectedId ? getUserProfileReport(selectedId) : Promise.resolve(null),
+    ]);
+    if (!sameId(profileReportCompetitorId.value, competitorId))
+      return;
+    profileReports.value = history.filter(report => belongsToCompetitor(report, competitorId));
+    if (detail && belongsToCompetitor(detail, competitorId))
+      selectedProfileReport.value = detail;
+    if (!hasRunningProfileReport())
+      stopProfileReportPolling();
+  }
+  catch (error) {
+    console.warn('画像研报刷新失败', error);
+  }
+  finally {
+    profileReportPolling = false;
   }
 }
 
@@ -940,6 +1009,10 @@ async function openTaskCompare(task: TaskRunVo) {
 onMounted(() => {
   loadWorkbench();
   loadUserProfile();
+});
+
+onUnmounted(() => {
+  stopProfileReportPolling();
 });
 
 async function loadWorkbench() {
@@ -1656,6 +1729,15 @@ function errorMessage(error: unknown, fallback: string) {
                     type="error"
                     :closable="false"
                     :title="selectedProfileReport.failureReason"
+                  />
+
+                  <el-alert
+                    v-if="selectedProfileReport.status === 'running'"
+                    class="profile-report-alert"
+                    show-icon
+                    type="info"
+                    :closable="false"
+                    title="研报正在后台生成，可继续浏览或切换页面，完成后这里会自动刷新"
                   />
 
                   <section class="profile-report-brief">
