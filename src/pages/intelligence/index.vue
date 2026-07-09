@@ -177,6 +177,11 @@ const userProfileStatusType = computed<TagType>(() => currentUserProfile.value ?
 const selectedProfileReportCompetitor = computed(() => competitors.value.find(competitor => sameId(competitor.id, profileReportCompetitorId.value)));
 const selectedProfileReportId = computed(() => selectedProfileReport.value?.id);
 const hasProfileReports = computed(() => profileReports.value.length > 0);
+const selectedProfileActionRows = computed(() => (selectedProfileReport.value?.recommendedActions || []).map((action, index) => ({
+  step: index + 1,
+  action,
+})));
+const selectedProfileEvidenceRows = computed(() => selectedProfileReport.value?.evidence || []);
 const filteredReports = computed(() => reports.value.filter((report) => {
   const keyword = reportKeyword.value.trim().toLowerCase();
   const matchesKeyword = !keyword
@@ -1656,106 +1661,77 @@ function errorMessage(error: unknown, fallback: string) {
                   <section class="profile-report-brief">
                     <el-alert
                       :title="selectedProfileReport.summary || '画像竞品研报'"
-                      type="success"
+                      type="info"
                       show-icon
                       :closable="false"
                     />
-                    <div class="profile-report-kpis">
-                      <el-statistic title="建议动作" :value="selectedProfileReport.recommendedActions.length" suffix="项" />
-                      <el-statistic title="证据" :value="selectedProfileReport.evidenceCount || selectedProfileReport.evidence.length" suffix="条" />
-                      <el-statistic title="画像版本" :value="selectedProfileReport.profileVersion?.id || 0" prefix="v" />
-                    </div>
                   </section>
 
-                  <el-tabs class="profile-report-tabs">
-                    <el-tab-pane label="决策简报">
-                      <div class="profile-report-sections">
-                        <section class="report-section-highlight">
-                          <h3>关键洞察</h3>
-                          <el-empty v-if="selectedProfileReport.keyInsights.length === 0" description="暂无洞察" />
-                          <ul v-else>
-                            <li v-for="insight in selectedProfileReport.keyInsights" :key="insight">
-                              {{ insight }}
-                            </li>
-                          </ul>
-                        </section>
-                        <section>
-                          <h3>画像影响</h3>
-                          <el-empty v-if="selectedProfileReport.profileImpacts.length === 0" description="暂无影响" />
-                          <el-collapse v-else>
-                            <el-collapse-item
-                              v-for="(impact, index) in selectedProfileReport.profileImpacts"
-                              :key="impact"
-                              :title="`影响 ${index + 1}`"
-                              :name="String(index)"
-                            >
-                              <p>{{ impact }}</p>
-                            </el-collapse-item>
-                          </el-collapse>
-                        </section>
+                  <div class="profile-report-sections">
+                    <section class="report-question-section">
+                      <h3>发生了什么</h3>
+                      <el-empty v-if="selectedProfileReport.keyInsights.length === 0" description="暂无内容" />
+                      <ul v-else>
+                        <li v-for="insight in selectedProfileReport.keyInsights" :key="insight">
+                          {{ insight }}
+                        </li>
+                      </ul>
+                    </section>
+
+                    <section class="report-question-section">
+                      <h3>为什么</h3>
+                      <el-empty v-if="selectedProfileReport.profileImpacts.length === 0" description="暂无内容" />
+                      <ul v-else>
+                        <li v-for="impact in selectedProfileReport.profileImpacts" :key="impact">
+                          {{ impact }}
+                        </li>
+                      </ul>
+                    </section>
+
+                    <section class="report-question-section">
+                      <h3>怎么做</h3>
+                      <el-empty v-if="selectedProfileActionRows.length === 0" description="暂无建议" />
+                      <el-table v-else :data="selectedProfileActionRows" size="small" border>
+                        <el-table-column prop="step" label="步骤" width="72" />
+                        <el-table-column prop="action" label="动作" min-width="360" />
+                      </el-table>
+                    </section>
+
+                    <section class="report-question-section">
+                      <h3>证据</h3>
+                      <el-empty v-if="selectedProfileEvidenceRows.length === 0" description="暂无证据" />
+                      <el-table v-else :data="selectedProfileEvidenceRows" size="small" border>
+                        <el-table-column prop="field" label="字段" width="110" />
+                        <el-table-column label="依据" min-width="260">
+                          <template #default="{ row }">
+                            {{ row.snippet || row.newValue || row.oldValue }}
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="newValue" label="取值" min-width="220" show-overflow-tooltip />
+                        <el-table-column label="来源" width="82">
+                          <template #default="{ row }">
+                            <el-link v-if="row.sourceUrl" :href="row.sourceUrl" target="_blank" :icon="Link">
+                              打开
+                            </el-link>
+                            <span v-else>-</span>
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                    </section>
+
+                    <section v-if="selectedProfileReport.markdownContent" class="profile-markdown-section">
+                      <div class="section-title-row">
+                        <h3>研报正文</h3>
                       </div>
-                    </el-tab-pane>
-
-                    <el-tab-pane label="行动方案">
-                      <section class="profile-action-board">
-                        <div class="section-title-row">
-                          <div>
-                            <h3>30 天行动计划</h3>
-                            <p>按顺序执行，并用指标复盘是否真的改变用户行为。</p>
-                          </div>
-                          <el-tag type="success" effect="light">
-                            可执行
-                          </el-tag>
-                        </div>
-                        <el-empty v-if="selectedProfileReport.recommendedActions.length === 0" description="暂无建议" />
-                        <el-timeline v-else>
-                          <el-timeline-item
-                            v-for="(action, index) in selectedProfileReport.recommendedActions"
-                            :key="action"
-                            :timestamp="`第 ${index + 1} 项`"
-                            placement="top"
-                          >
-                            <p>{{ action }}</p>
-                          </el-timeline-item>
-                        </el-timeline>
-                      </section>
-                    </el-tab-pane>
-
-                    <el-tab-pane label="证据与正文">
-                      <section>
-                        <div class="section-title-row">
-                          <h3>证据</h3>
-                        </div>
-                        <el-empty v-if="selectedProfileReport.evidence.length === 0" description="暂无证据" />
-                        <div v-else class="profile-evidence-list">
-                          <article v-for="item in selectedProfileReport.evidence" :key="`${item.field}-${item.sourceUrl}`" class="profile-evidence-item">
-                            <header>
-                              <el-tag effect="plain">
-                                {{ item.field }}
-                              </el-tag>
-                              <el-link v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" :icon="Link">
-                                来源
-                              </el-link>
-                            </header>
-                            <p>{{ item.snippet || item.newValue || item.oldValue }}</p>
-                          </article>
-                        </div>
-                      </section>
-
-                      <section v-if="selectedProfileReport.markdownContent" class="profile-markdown-section">
-                        <div class="section-title-row">
-                          <h3>研报正文</h3>
-                        </div>
-                        <XMarkdown
-                          :markdown="selectedProfileReport.markdownContent"
-                          :code-x-render="codeXRender"
-                          class="profile-markdown-body"
-                          :themes="{ light: 'github-light', dark: 'github-dark' }"
-                          default-theme-mode="light"
-                        />
-                      </section>
-                    </el-tab-pane>
-                  </el-tabs>
+                      <XMarkdown
+                        :markdown="selectedProfileReport.markdownContent"
+                        :code-x-render="codeXRender"
+                        class="profile-markdown-body"
+                        :themes="{ light: 'github-light', dark: 'github-dark' }"
+                        default-theme-mode="light"
+                      />
+                    </section>
+                  </div>
                 </template>
                 <el-empty v-else description="选择或生成一份画像研报" />
               </article>
@@ -3476,37 +3452,10 @@ function errorMessage(error: unknown, fallback: string) {
   gap: 12px;
   margin-top: 14px;
 }
-.profile-report-kpis {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  :deep(.el-statistic) {
-    min-width: 0;
-    padding: 12px;
-    background: #f8fbff;
-    border: 1px solid var(--ci-border-soft);
-    border-radius: 8px;
-  }
-  :deep(.el-statistic__head) {
-    margin-bottom: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--ci-text-secondary);
-  }
-  :deep(.el-statistic__content) {
-    color: var(--ci-text);
-  }
-}
-.profile-report-tabs {
-  margin-top: 14px;
-  :deep(.el-tabs__content) {
-    overflow: visible;
-  }
-}
 .profile-report-sections {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  margin-top: 14px;
   > section {
     min-width: 0;
     padding: 14px;
@@ -3528,78 +3477,16 @@ function errorMessage(error: unknown, fallback: string) {
     line-height: 1.65;
     color: var(--ci-text-secondary);
   }
-  :deep(.el-timeline) {
-    padding-left: 0;
+  :deep(.el-table) {
+    --el-table-border-color: var(--ci-border-soft);
+    font-size: 13px;
   }
-  :deep(.el-collapse) {
-    border-top: 0;
-    border-bottom: 0;
-  }
-  :deep(.el-collapse-item__header) {
-    height: 36px;
-    font-weight: 700;
-    color: var(--ci-text);
-    background: transparent;
-  }
-  :deep(.el-collapse-item__wrap) {
-    background: transparent;
-  }
-  :deep(.el-collapse-item__content) {
-    padding-bottom: 12px;
-  }
-}
-.report-section-highlight {
-  background: #f8fbff !important;
-  border-color: #bfdbfe !important;
-}
-.profile-action-board {
-  min-width: 0;
-  padding: 14px;
-  background: var(--ci-surface);
-  border: 1px solid var(--ci-border-soft);
-  border-radius: 8px;
-  :deep(.el-timeline) {
-    padding-left: 0;
-  }
-  :deep(.el-timeline-item__timestamp) {
-    font-weight: 700;
-    color: var(--ci-primary);
-  }
-  p {
-    margin: 0;
-    line-height: 1.65;
-    color: var(--ci-text);
-  }
-}
-.profile-evidence-list {
-  display: grid;
-  gap: 8px;
-}
-.profile-evidence-item {
-  padding: 10px 12px;
-  background: var(--ci-surface-raised);
-  border: 1px solid var(--ci-border-soft);
-  border-radius: 8px;
-  header {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  p {
-    margin: 0;
-    line-height: 1.6;
-    color: var(--ci-text-secondary);
-    word-break: break-word;
+  :deep(.el-table .cell) {
+    line-height: 1.55;
   }
 }
 .profile-markdown-section {
-  padding: 14px;
-  margin-top: 14px;
   background: var(--ci-surface);
-  border: 1px solid var(--ci-border-soft);
-  border-radius: 8px;
 }
 .profile-markdown-body {
   padding: 4px 2px 0;
@@ -3908,7 +3795,6 @@ function errorMessage(error: unknown, fallback: string) {
   .targets-layout,
   .entities-layout,
   .profile-report-sections,
-  .profile-report-kpis,
   .analysis-grid {
     grid-template-columns: 1fr;
   }
