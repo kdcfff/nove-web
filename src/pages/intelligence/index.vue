@@ -12,6 +12,8 @@ import type {
   ScheduleMode,
   TaskCompareVo,
   TaskRunVo,
+  UserProfileRequest,
+  UserProfileVo,
 } from '@/api/intelligence/types';
 import {
   Aim,
@@ -34,6 +36,7 @@ import {
   deleteMonitorTarget,
   getReportDetail,
   getTaskCompare,
+  getUserProfile,
   listCompetitors,
   listInboxReports,
   listMonitorTargets,
@@ -43,6 +46,7 @@ import {
   submitReportFeedback,
   triggerTargetCollect,
   updateMonitorTargetSchedule,
+  updateUserProfile,
   writeReportToKnowledge,
 } from '@/api/intelligence';
 
@@ -52,15 +56,18 @@ const startMonitoringLoading = ref(false);
 const deletingCompetitorId = ref<number>();
 const deletingTargetId = ref<number>();
 const taskLoading = ref(false);
+const profileLoading = ref(false);
+const profileSaving = ref(false);
 const feedbackSubmitting = ref(false);
 const collectingCompetitorIds = ref<number[]>([]);
 const pageError = ref('');
-const activeView = ref<'reports' | 'entities' | 'tasks'>('entities');
+const activeView = ref<'profile' | 'reports' | 'entities' | 'tasks'>('entities');
 const competitors = ref<CompetitorVo[]>([]);
 const targets = ref<MonitorTargetVo[]>([]);
 const reports = ref<ReportSummaryVo[]>([]);
 const tasks = ref<TaskRunVo[]>([]);
 const selectedReport = ref<ReportDetailVo | null>(null);
+const currentUserProfile = ref<UserProfileVo | null>(null);
 type DraftSource = MonitorTargetSource;
 type ValidationStatus = 'pending' | 'success' | 'failed';
 type CollectionStatus = 'idle' | 'saving' | 'collecting' | 'baseline' | 'failed';
@@ -123,6 +130,19 @@ const scheduleForm = reactive<MonitorTargetScheduleRequest>({
   captureAdapter: 'auto',
 });
 
+const userProfileForm = reactive<UserProfileRequest>({
+  profileName: '',
+  targetUsers: '',
+  scenario: '',
+  painPoints: '',
+  motivations: '',
+  decisionFactors: '',
+  objections: '',
+  positioning: '',
+  keyMetrics: '',
+  markdownNotes: '',
+});
+
 const hasReports = computed(() => reports.value.length > 0);
 const unreadCount = computed(() => reports.value.filter(item => !item.read).length);
 const activeTargetCount = computed(() => targets.value.filter(item => item.status === 'active').length);
@@ -138,6 +158,9 @@ const detailStartupRuns = computed(() => detailCompetitor.value ? startupRuns.va
 const detailUnreadCount = computed(() => detailReports.value.filter(report => !report.read).length);
 const detailSelectedDraftCount = computed(() => detailDrafts.value.filter(draft => draft.selected).length);
 const manualTargetDialogTitle = computed(() => editingManualDraft.value ? '编辑监控目标' : '手动添加监控目标');
+const userProfileUpdatedAt = computed(() => currentUserProfile.value?.updatedAt || currentUserProfile.value?.version?.updatedAt);
+const userProfileVersionLabel = computed(() => currentUserProfile.value?.version?.id ? `v${currentUserProfile.value.version.id}` : '未保存');
+const userProfileStatusType = computed<TagType>(() => currentUserProfile.value ? 'success' : 'info');
 const filteredReports = computed(() => reports.value.filter((report) => {
   const keyword = reportKeyword.value.trim().toLowerCase();
   const matchesKeyword = !keyword
@@ -241,6 +264,23 @@ const triggerSourceLabels: Record<string, string> = {
   scheduled: '定时',
 };
 
+interface UserProfileField {
+  key: keyof Omit<UserProfileRequest, 'profileName' | 'markdownNotes'>;
+  label: string;
+  placeholder: string;
+}
+
+const userProfileFields: UserProfileField[] = [
+  { key: 'targetUsers', label: '目标用户', placeholder: '例如：AI 产品团队、增长负责人、运营分析师' },
+  { key: 'scenario', label: '核心场景', placeholder: '例如：持续跟踪竞品定价、文档、定位和活动变化' },
+  { key: 'painPoints', label: '关键痛点', placeholder: '用户现在最难忍受、最想被解决的问题' },
+  { key: 'motivations', label: '购买/使用动机', placeholder: '触发试用、采购或持续使用的关键动力' },
+  { key: 'decisionFactors', label: '决策因素', placeholder: '影响选择的能力、价格、可信度、协作等因素' },
+  { key: 'objections', label: '反对理由', placeholder: '用户可能拒绝、犹豫或流失的原因' },
+  { key: 'positioning', label: '产品定位', placeholder: '我方产品希望在用户心中占据的位置' },
+  { key: 'keyMetrics', label: '重点关注指标', placeholder: '例如：激活、留存、转化、胜率、处理时长' },
+];
+
 const feedbackLabels: Record<FeedbackValue, string> = {
   useful: '有帮助',
   not_useful: '不相关',
@@ -256,6 +296,75 @@ const knowledgeStatusLabels: Record<ReportDetailVo['knowledgeWritebackStatus'], 
 
 function openCompetitorDialog() {
   competitorDialogVisible.value = true;
+}
+
+function resetUserProfileForm() {
+  Object.assign(userProfileForm, {
+    profileName: '',
+    targetUsers: '',
+    scenario: '',
+    painPoints: '',
+    motivations: '',
+    decisionFactors: '',
+    objections: '',
+    positioning: '',
+    keyMetrics: '',
+    markdownNotes: '',
+  });
+}
+
+function applyUserProfile(profile: UserProfileVo | null) {
+  currentUserProfile.value = profile;
+  if (!profile) {
+    resetUserProfileForm();
+    return;
+  }
+  Object.assign(userProfileForm, {
+    profileName: profile.profileName || '',
+    targetUsers: profile.targetUsers || '',
+    scenario: profile.scenario || '',
+    painPoints: profile.painPoints || '',
+    motivations: profile.motivations || '',
+    decisionFactors: profile.decisionFactors || '',
+    objections: profile.objections || '',
+    positioning: profile.positioning || '',
+    keyMetrics: profile.keyMetrics || '',
+    markdownNotes: profile.markdownNotes || '',
+  });
+}
+
+async function loadUserProfile() {
+  profileLoading.value = true;
+  try {
+    applyUserProfile(await getUserProfile());
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '用户画像加载失败'));
+  }
+  finally {
+    profileLoading.value = false;
+  }
+}
+
+async function handleSaveUserProfile() {
+  if (profileSaving.value)
+    return;
+  if (!userProfileForm.profileName.trim()) {
+    ElMessage.warning('请填写画像名称');
+    return;
+  }
+  profileSaving.value = true;
+  try {
+    const saved = await updateUserProfile({ ...userProfileForm });
+    applyUserProfile(saved);
+    ElMessage.success('用户画像已更新');
+  }
+  catch (error) {
+    ElMessage.error(errorMessage(error, '用户画像保存失败'));
+  }
+  finally {
+    profileSaving.value = false;
+  }
 }
 
 function resetCompetitorForm() {
@@ -689,6 +798,7 @@ async function openTaskCompare(task: TaskRunVo) {
 
 onMounted(() => {
   loadWorkbench();
+  loadUserProfile();
 });
 
 async function loadWorkbench() {
@@ -1205,6 +1315,93 @@ function errorMessage(error: unknown, fallback: string) {
     </section>
 
     <el-tabs v-model="activeView" class="workbench-tabs">
+      <el-tab-pane label="我方画像" name="profile">
+        <section v-loading="profileLoading" class="profile-workspace">
+          <el-card shadow="never" class="table-card profile-form-card">
+            <template #header>
+              <div class="card-header">
+                <span>用户画像</span>
+                <div class="card-actions">
+                  <el-tag :type="userProfileStatusType" effect="light">
+                    {{ userProfileVersionLabel }}
+                  </el-tag>
+                  <el-button type="primary" :icon="DocumentChecked" :loading="profileSaving" @click="handleSaveUserProfile">
+                    保存画像
+                  </el-button>
+                </div>
+              </div>
+            </template>
+
+            <el-form label-position="top" class="profile-form" @submit.prevent="handleSaveUserProfile">
+              <el-form-item label="画像名称" required>
+                <el-input v-model="userProfileForm.profileName" maxlength="80" show-word-limit placeholder="例如 Nova ICP" />
+              </el-form-item>
+
+              <div class="profile-field-grid">
+                <el-form-item v-for="field in userProfileFields" :key="field.key" :label="field.label">
+                  <el-input
+                    v-model="userProfileForm[field.key]"
+                    :placeholder="field.placeholder"
+                    :rows="3"
+                    maxlength="800"
+                    show-word-limit
+                    type="textarea"
+                  />
+                </el-form-item>
+              </div>
+
+              <el-form-item label="Markdown 补充说明">
+                <el-input
+                  v-model="userProfileForm.markdownNotes"
+                  :rows="8"
+                  maxlength="4000"
+                  placeholder="## 画像补充"
+                  show-word-limit
+                  type="textarea"
+                />
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <aside class="profile-side">
+            <section class="surface profile-status-panel">
+              <div class="section-title-row">
+                <div>
+                  <h3>当前生效</h3>
+                  <p>{{ userProfileUpdatedAt ? formatTime(userProfileUpdatedAt) : '尚未保存' }}</p>
+                </div>
+                <el-tag :type="userProfileStatusType" size="large">
+                  {{ currentUserProfile ? '已生效' : '未创建' }}
+                </el-tag>
+              </div>
+              <el-descriptions :column="1" border>
+                <el-descriptions-item label="版本">
+                  {{ userProfileVersionLabel }}
+                </el-descriptions-item>
+                <el-descriptions-item label="画像名称">
+                  {{ currentUserProfile?.profileName || '-' }}
+                </el-descriptions-item>
+                <el-descriptions-item label="更新时间">
+                  {{ userProfileUpdatedAt ? formatTime(userProfileUpdatedAt) : '-' }}
+                </el-descriptions-item>
+              </el-descriptions>
+            </section>
+
+            <section class="surface profile-status-panel">
+              <div class="section-title-row">
+                <h3>字段摘要</h3>
+              </div>
+              <div class="profile-summary-list">
+                <div v-for="field in userProfileFields" :key="field.key">
+                  <span>{{ field.label }}</span>
+                  <p>{{ userProfileForm[field.key] || '-' }}</p>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </section>
+      </el-tab-pane>
+
       <el-tab-pane label="情报报告" name="reports">
         <section class="workbench-grid">
           <aside class="surface inbox-panel">
@@ -2772,6 +2969,62 @@ function errorMessage(error: unknown, fallback: string) {
   margin-top: 16px;
   border-top: 1px solid var(--ci-border-soft);
 }
+.profile-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 14px;
+  align-items: start;
+}
+.profile-form-card {
+  min-width: 0;
+}
+.profile-form {
+  :deep(.el-textarea__inner) {
+    line-height: 1.6;
+  }
+}
+.profile-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 14px;
+}
+.profile-side {
+  display: grid;
+  gap: 14px;
+}
+.profile-status-panel {
+  padding: 14px;
+}
+.profile-summary-list {
+  display: grid;
+  gap: 10px;
+  div {
+    min-width: 0;
+    padding: 10px 12px;
+    background: var(--ci-surface-raised);
+    border: 1px solid var(--ci-border-soft);
+    border-radius: 8px;
+  }
+  span {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ci-text-secondary);
+  }
+  p {
+    display: -webkit-box;
+    min-height: 20px;
+    max-height: 64px;
+    margin: 0;
+    overflow: hidden;
+    line-height: 1.55;
+    color: var(--ci-text);
+    word-break: break-word;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+}
 .management-layout,
 .targets-layout,
 .entities-layout {
@@ -3025,6 +3278,7 @@ function errorMessage(error: unknown, fallback: string) {
 
 @media (width <= 980px) {
   .workbench-grid,
+  .profile-workspace,
   .management-layout,
   .targets-layout,
   .entities-layout,
@@ -3060,6 +3314,7 @@ function errorMessage(error: unknown, fallback: string) {
   }
   .metric-grid,
   .panel-toolbar,
+  .profile-field-grid,
   .diff-grid {
     grid-template-columns: 1fr;
   }

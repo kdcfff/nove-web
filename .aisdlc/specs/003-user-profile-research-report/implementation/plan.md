@@ -228,7 +228,7 @@
 
 ### Task T3: 用户画像管理 UI
 
-- [ ] **状态**：未开始
+- [x] **状态**：完成
 
 **代码仓范围：**
 - 根项目：`nova-web`
@@ -256,6 +256,7 @@
 **步骤 3：运行验证**
 - Run: `pnpm build`
 - Expected: PASS，画像表单相关类型和模板编译通过。
+- Result: PASS，执行 `pnpm build`，`vue-tsc -b && vite build` 通过；仅有既有 KaTeX 字体、`:deep` 和 chunk size warning。
 
 **步骤 4：提交（频繁提交；commit message 必须中文）**
 - Commit message: `实现竞品情报用户画像管理界面`
